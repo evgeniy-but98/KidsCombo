@@ -44,6 +44,10 @@ $Slugs = [ordered]@{
 }
 
 $ImageExt = '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'
+# Иконка сайта и картинка-превью для мессенджеров — обрабатываются отдельно
+$FaviconNames = 'favicon', 'icon'
+$OgNames = 'og-preview', 'og preview', 'og-image', 'og image', 'og'
+$SpecialImages = $FaviconNames + $OgNames
 $AudioExt = '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.opus'
 $VideoExt = '.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'
 
@@ -204,6 +208,7 @@ foreach ($f in $rootFiles) {
   $ext = $f.Extension.ToLowerInvariant()
   if ($ImageExt -notcontains $ext) { continue }
   $key = Normalize $f.BaseName
+  if ($SpecialImages -contains $key) { continue } # иконка и превью — ниже, отдельным блоком
   if ($Slugs.Contains($key)) {
     $slug = $Slugs[$key]
   }
@@ -238,6 +243,78 @@ foreach ($f in $rootFiles) {
 $required = @('door', 'master') + @($Slugs.Values | Where-Object { $_ -notin 'door', 'master' } | Select-Object -Unique)
 foreach ($s in $required) {
   if (-not $seen.ContainsKey($s)) { $Warnings.Add("Нет исходника для '$s'.") }
+}
+
+# --- Иконка сайта и превью для мессенджеров ----------------------------------
+function Find-Special([string[]]$names) {
+  return $rootFiles | Where-Object {
+    ($ImageExt -contains $_.Extension.ToLowerInvariant()) -and ($names -contains (Normalize $_.BaseName))
+  } | Select-Object -First 1
+}
+
+$fav = Find-Special $FaviconNames
+if ($fav) {
+  $iconsDir = Join-Path $DstDir 'icons'
+  New-Item -ItemType Directory -Force -Path $iconsDir | Out-Null
+  Write-Host "  $($fav.Name) -> icons\favicon.ico, icon-192.png, apple-touch-icon.png"
+  # Иконка должна быть квадратной: дополняем прозрачными полями по центру
+  $square = "format=rgba,pad='max(iw,ih)':'max(iw,ih)':'(ow-iw)/2':'(oh-ih)/2':color=0x00000000"
+
+  # favicon.ico: 16, 32 и 48 px в одном файле (вкладка браузера, закладки, поиск)
+  $ico = Join-Path $iconsDir 'favicon.ico'
+  $note = ''
+  if (Test-Fresh $fav.FullName $ico) { $note = 'без изменений' }
+  else {
+    $graph = "[0:v]$square,split=3[a][b][c];[a]scale=16:16:flags=lanczos[s16];[b]scale=32:32:flags=lanczos[s32];[c]scale=48:48:flags=lanczos[s48]"
+    if (-not (Invoke-FFmpeg @('-i', $fav.FullName, '-filter_complex', $graph,
+        '-map', '[s16]', '-map', '[s32]', '-map', '[s48]', '-c:v', 'png', $ico))) { $note = 'ОШИБКА' }
+  }
+  Add-Row $fav.FullName $ico $note
+  # Копия в корень сайта: некоторые сервисы запрашивают /favicon.ico напрямую
+  if (Test-Path -LiteralPath $ico) { Copy-Item -LiteralPath $ico -Destination (Join-Path $Root 'favicon.ico') -Force }
+
+  # 192 px — Android и вкладки на экранах высокой плотности
+  $png192 = Join-Path $iconsDir 'icon-192.png'
+  $note = ''
+  if (Test-Fresh $fav.FullName $png192) { $note = 'без изменений' }
+  elseif (-not (Invoke-FFmpeg @('-i', $fav.FullName, '-vf', "$square,scale=192:192:flags=lanczos", '-frames:v', '1', $png192))) { $note = 'ОШИБКА' }
+  Add-Row $fav.FullName $png192 $note
+
+  # 180 px для iPhone («На экран Домой»): iOS заливает прозрачность чёрным, поэтому свой фон
+  $apple = Join-Path $iconsDir 'apple-touch-icon.png'
+  $note = ''
+  if (Test-Fresh $fav.FullName $apple) { $note = 'без изменений' }
+  else {
+    $graph = "[0:v]$square,scale=148:148:flags=lanczos[fg];color=c=0x1a100b:s=180x180[bg];[bg][fg]overlay=16:16:format=auto,format=rgb24"
+    if (-not (Invoke-FFmpeg @('-i', $fav.FullName, '-filter_complex', $graph, '-frames:v', '1', $apple))) { $note = 'ОШИБКА' }
+  }
+  Add-Row $fav.FullName $apple $note
+}
+else {
+  $Warnings.Add('Нет assets_src/favicon.png — у вкладки не будет иконки.')
+}
+
+$og = Find-Special $OgNames
+if ($og) {
+  # Превью ссылки (Telegram, WhatsApp, VK): JPEG до ~300 КБ — иначе WhatsApp может не показать картинку
+  $ogOut = Join-Path $DstDir 'og-preview.jpg'
+  Write-Host "  $($og.Name) -> og-preview.jpg"
+  $note = ''
+  if (Test-Fresh $og.FullName $ogOut) { $note = 'без изменений' }
+  else {
+    foreach ($q in 3, 5, 7, 9) {
+      $ok = Invoke-FFmpeg @('-i', $og.FullName, '-vf', "scale='min(1200,iw)':-2:flags=lanczos,format=yuvj420p",
+                            '-frames:v', '1', '-q:v', "$q", $ogOut)
+      if (-not $ok) { $note = 'ОШИБКА'; break }
+      if ((Get-Item -LiteralPath $ogOut).Length -le 300KB) { break }
+    }
+  }
+  Add-Row $og.FullName $ogOut $note
+  $ow = Get-Width $og.FullName
+  if ($ow -lt 600) { $Warnings.Add("og-preview шириной $ow px — мессенджеры покажут маленькое превью. Лучше 1200x630 или 960x540.") }
+}
+else {
+  $Warnings.Add('Нет assets_src/og-preview.png — при отправке ссылки не будет картинки.')
 }
 
 # --- Музыка -----------------------------------------------------------------
