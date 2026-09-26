@@ -35,7 +35,27 @@
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
   var lerp = function (a, b, t) { return a + (b - a) * t; };
-  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  /*
+    Упрощённый режим: кроссфейды вместо полётов камеры, без эффектов.
+    По умолчанию системная настройка «уменьшить движение» НЕ учитывается: движение камеры —
+    суть тритмента, а у многих зрителей она включена без их ведома (Windows: выключены
+    «Эффекты анимации»; Android: «Удалить анимацию» или режим энергосбережения; iOS: «Уменьшение движения»).
+    settings.reducedMotion: "ignore" (по умолчанию) | "respect" — учитывать системную настройку
+                            | "always" — всегда упрощённый режим.
+    Для проверки можно добавить в адрес ?motion=reduce или ?motion=full.
+  */
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var motionParam = null;
+  try { motionParam = new URLSearchParams(location.search).get("motion"); } catch (e) {}
+  var reducedMotion = {
+    get matches() {
+      if (motionParam === "reduce") return true;
+      if (motionParam === "full") return false;
+      if (SET.reducedMotion === "always") return true;
+      if (SET.reducedMotion === "respect") return motionQuery.matches;
+      return false;
+    }
+  };
 
   var el = {
     stage: $("#stage"),
@@ -310,10 +330,32 @@
     if (L.tiles.has(t.key)) return;
     L.tiles.set(t.key, null);
     loadImage(t.src).then(function (img) {
+      if (!L.tiles.has(t.key)) return; // успели выгрузить
       L.tiles.set(t.key, img);
+      self.touchTile(li, t.key, t.src);
       self.warm(img);
       self.dirty = true;
     }, function () { L.tiles.delete(t.key); });
+  };
+
+  /*
+    Тайл полного разрешения в памяти — около 16 МБ. На телефонах памяти мало, поэтому
+    держим ограниченное число тайлов верхнего уровня: давно не нужные выгружаются
+    (видимые сейчас — никогда).
+  */
+  var TILE_BUDGET = window.matchMedia("(pointer: coarse)").matches ? 8 : 32;
+  MasterRenderer.prototype.touchTile = function (li, key, src) {
+    if (li !== this.levels.length - 1) return;
+    var lru = this.lru || (this.lru = []);
+    for (var i = 0; i < lru.length; i++) if (lru[i].key === key) { lru.splice(i, 1); break; }
+    lru.push({ key: key, src: src });
+    var L = this.levels[li], visible = this.visibleKeys || {};
+    for (var j = 0; lru.length > TILE_BUDGET && j < lru.length; ) {
+      if (visible[lru[j].key]) { j++; continue; }
+      var old = lru.splice(j, 1)[0];
+      L.tiles.delete(old.key);
+      imageCache.delete(old.src);
+    }
   };
 
   // Загрузить все тайлы уровня
@@ -393,6 +435,10 @@
     var tiles = li >= 0 ? this.visibleTiles(li, x0, y0, w, h) : [];
     var L = li >= 0 ? this.levels[li] : null;
     var complete = li >= 0 && tiles.every(function (t) { return L.tiles.get(t.key); });
+    var top = li >= 0 && li === this.levels.length - 1;
+    var vk = {};
+    if (top) tiles.forEach(function (t) { vk[t.key] = 1; });
+    this.visibleKeys = vk;
 
     if (!complete) {
       ctx.fillStyle = "#120b08";
@@ -412,8 +458,10 @@
     }
     for (var i = 0; i < tiles.length; i++) {
       var t = tiles[i], img = L.tiles.get(t.key);
-      if (img) this.blit(img, img.naturalWidth, img.naturalHeight, t, x0, y0, w, h, k);
-      else this.requestTile(li, t);
+      if (img) {
+        this.blit(img, img.naturalWidth, img.naturalHeight, t, x0, y0, w, h, k);
+        if (top) this.touchTile(li, t.key, t.src);
+      } else this.requestTile(li, t);
     }
   };
 
@@ -1514,10 +1562,12 @@
       .sort(function (a, b) { return a.d - b.d; });
     order.forEach(function (o, n) { if (o.s.bg) enqueue(closeupSrc(o.s.bg), 3 - n * 0.01); });
     // Уровень ½ целиком (он нужен почти на любом перелёте), затем тайлы остановок
+    // На телефонах (мало памяти) — только ближайшие остановки, остальные догрузятся по пути
+    var stops = order.filter(function (o) { return !isCover(o.s); });
+    if (TILE_BUDGET < 32) stops = stops.slice(0, 3);
     setTimeout(function () {
       master.requestLevel(0);
-      order.forEach(function (o) {
-        if (isCover(o.s)) return;
+      stops.forEach(function (o) {
         master.prefetch(camView(o.s));
         master.prefetch(anchorView(o.s));
       });
