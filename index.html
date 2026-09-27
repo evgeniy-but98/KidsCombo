@@ -1,112 +1,53 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#140d0a">
-  <title>Новогодняя комната — режиссёрский тритмент</title>
-  <meta name="description" content="Режиссёрский тритмент анимационного проекта «Новогодняя комната»: камера входит в дверь и путешествует по уютной детской комнате в новогоднюю ночь.">
-
-  <!-- Иконка вкладки (файлы создаёт scripts/optimize.ps1 из assets_src/favicon.png) -->
-  <link rel="icon" href="assets/icons/favicon.ico" sizes="16x16 32x32 48x48">
-  <link rel="icon" type="image/png" href="assets/icons/icon-192.png" sizes="192x192">
-  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
-
-  <!--
-    Превью ссылки в мессенджерах и соцсетях (Open Graph).
-    Адреса должны быть полными, с доменом: иначе Telegram, WhatsApp и VK картинку не покажут.
-    При смене домена или включении HTTPS замените http://treatmentseryak.ru/ во всех строках ниже.
-  -->
-  <link rel="canonical" href="http://treatmentseryak.ru/">
-  <meta property="og:type" content="website">
-  <meta property="og:locale" content="ru_RU">
-  <meta property="og:site_name" content="Новогодняя комната">
-  <meta property="og:url" content="http://treatmentseryak.ru/">
-  <meta property="og:title" content="Новогодняя комната — режиссёрский тритмент">
-  <meta property="og:description" content="Камера входит в дверь и путешествует по уютной детской комнате в новогоднюю ночь.">
-  <meta property="og:image" content="http://treatmentseryak.ru/assets/og-preview.jpg">
-  <meta property="og:image:type" content="image/jpeg">
-  <meta property="og:image:width" content="960">
-  <meta property="og:image:height" content="540">
-  <meta property="og:image:alt" content="Снежный шар с Дедом Морозом в варежках на фоне камина">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Новогодняя комната — режиссёрский тритмент">
-  <meta name="twitter:description" content="Камера входит в дверь и путешествует по уютной детской комнате в новогоднюю ночь.">
-  <meta name="twitter:image" content="http://treatmentseryak.ru/assets/og-preview.jpg">
-
-  <link rel="stylesheet" href="fonts/fonts.css">
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Кидз Комбо × Снежные шары — режиссёрский тритмент</title>
+<meta name="description" content="Режиссёрский тритмент анимационного ролика «Кидз Комбо × Снежные шары».">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Кидз Комбо × Снежные шары">
+<meta property="og:description" content="Режиссёрский тритмент анимационного ролика">
+<meta property="og:image" content="assets/image/og-preview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1a0f0a">
+<link rel="icon" type="image/png" href="assets/image/favicon.png">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="stage" aria-live="polite">
-    <!-- Мастер-кадр: рисуется на canvas тайлами (см. app.js, MasterRenderer) -->
-    <canvas id="master" class="layer"></canvas>
+<main id="stage"></main>
+<div id="overlay"></div>
 
-    <!-- Обложка: коридор с вырезом под дверь, полотно двери, свет из проёма -->
-    <div id="door-view" class="layer">
-      <div id="door-world" class="world">
-        <div id="door-glow-in"></div>
-        <div id="corridor"></div>
-        <div id="door-glow-out"></div>
-        <div id="door-hinge">
-          <div id="door-leaf">
-            <div class="door-face door-front"></div>
-            <div class="door-face door-back"></div>
-            <div id="poster"></div>
-          </div>
-        </div>
-      </div>
-    </div>
+<button class="open" type="button">Открыть</button>
 
-    <!-- Крупные планы: два слота, чередуются -->
-    <div id="closeups" class="layer">
-      <div class="closeup"><img alt="" draggable="false"></div>
-      <div class="closeup"><img alt="" draggable="false"></div>
-    </div>
+<button class="mute" type="button" aria-label="Без звука" aria-pressed="false" hidden>
+  <svg class="mute__on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5z"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></svg>
+  <svg class="mute__off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
+</button>
 
-    <div id="frost" class="layer"></div>
-    <div id="shade" class="layer"></div>
-    <div id="flicker" class="layer"></div>
-    <canvas id="snow" class="layer"></canvas>
+<nav class="nav" aria-label="Слайды">
+  <button class="nav__btn nav__prev" type="button" aria-label="Назад">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+  </button>
+  <ol class="nav__dots"></ol>
+  <span class="nav__count" aria-live="polite"></span>
+  <button class="nav__btn nav__next" type="button" aria-label="Вперёд">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+  </button>
+</nav>
 
-    <main id="content" class="layer"></main>
+<button class="tap" type="button" hidden>Нажмите, чтобы начать</button>
 
-    <nav id="ui">
-      <button id="btn-prev" class="nav-btn" type="button" aria-label="Назад">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
-      </button>
-      <div id="progress">
-        <div id="dots" role="tablist"></div>
-        <div id="counter"><span id="counter-cur">01</span> / <span id="counter-total">15</span></div>
-      </div>
-      <button id="btn-next" class="nav-btn" type="button" aria-label="Вперёд">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
-      </button>
-    </nav>
-    <button id="btn-mute" class="corner-btn" type="button" aria-label="Выключить звук" title="Звук (M)">
-      <svg class="ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
-      <svg class="ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16.5 9.5l5 5M21.5 9.5l-5 5"/></svg>
-    </button>
-    <div id="toast" role="status"></div>
-  </div>
+<div class="loader" role="progressbar" aria-label="Загрузка" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+  <img class="loader__globe" src="assets/image/favicon.png" alt="" width="146" height="177">
+  <div class="loader__bar"><span></span></div>
+  <p class="loader__pct">0%</p>
+</div>
 
-  <div id="loader">
-    <div class="loader-inner">
-      <div class="loader-star" aria-hidden="true">
-        <svg viewBox="0 0 48 48"><path d="M24 3l5.6 13.2L44 17.6l-10.8 9.6 3.2 14.2L24 34l-12.4 7.4 3.2-14.2L4 17.6l14.4-1.4z"/></svg>
-      </div>
-      <div class="loader-title">Новогодняя комната</div>
-      <div class="loader-bar"><div id="loader-fill"></div></div>
-      <div id="loader-pct">0%</div>
-    </div>
-  </div>
-
-  <audio id="music" loop preload="auto"></audio>
-
-  <script src="vendor/gsap.min.js"></script>
-  <script src="assets/master/tiles.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
-  <script src="debug.js"></script>
+<script src="assets/manifest.js"></script>
+<script src="config.js"></script>
+<script src="player.js"></script>
+<script src="app.js"></script>
+<script src="debug.js"></script>
 </body>
 </html>

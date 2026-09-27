@@ -1,380 +1,193 @@
-﻿<#
-  Сжатие ассетов: assets_src/ -> assets/
-  Запуск из корня проекта:
-    powershell -ExecutionPolicy Bypass -File scripts\optimize.ps1          (только изменённые файлы)
-    powershell -ExecutionPolicy Bypass -File scripts\optimize.ps1 -Force   (пересобрать всё)
-  Нужен ffmpeg (и ffprobe) в PATH.
-  Файл сохранён в UTF-8 с BOM — иначе Windows PowerShell 5.1 не прочитает кириллицу.
-#>
+﻿# Сжатие ассетов: assets_src/ -> assets/ + генерация assets/manifest.js
+# Запуск: scripts\optimize.cmd (двойной клик) или
+#   powershell -ExecutionPolicy Bypass -File scripts\optimize.ps1 [-Force]
+# Соглашение об именах в assets_src/video/:
+#   stop__<id>.mp4        цикл остановки
+#   tr__<from>__<to>.mp4  пролёт (обратный генерируется реверсом, если нет ручного tr__<to>__<from>)
+#   still__<id>.webp|png|jpg  статичная картинка для остановки без цикла
 param([switch]$Force)
 
-$ErrorActionPreference = 'Continue'
-try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+$Root = Split-Path $PSScriptRoot -Parent
+$Src = Join-Path $Root 'assets_src'
+$Out = Join-Path $Root 'assets'
 
-$Root = Split-Path -Parent $PSScriptRoot
-$SrcDir  = Join-Path $Root 'assets_src'
-$DstDir  = Join-Path $Root 'assets'
+$LoopPsnrWarn = 30   # дБ: первый/последний кадр цикла ниже порога -> рывок на стыке
+$JoinPsnrWarn = 20   # дБ: последний кадр пролёта vs первый кадр цикла цели ниже порога -> нужна склейка
+$VideoArgs = @('-c:v', 'libx264', '-profile:v', 'high', '-preset', 'slow', '-crf', '21', '-pix_fmt', 'yuv420p',
+               '-g', '24', '-keyint_min', '24', '-sc_threshold', '0', '-movflags', '+faststart')
 
-foreach ($tool in 'ffmpeg', 'ffprobe') {
-  if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-    Write-Host "Не найден $tool в PATH. Установите FFmpeg и повторите." -ForegroundColor Red
-    exit 1
-  }
+$Inv = [Globalization.CultureInfo]::InvariantCulture
+$IdRe = '[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*'   # id без двойного подчёркивания
+$VideoExt = '\.(mp4|mov|webm|mkv)$'
+$ImageExt = '\.(webp|png|jpe?g)$'
+
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Write-Host 'ffmpeg не найден в PATH' -ForegroundColor Red; exit 1 }
+
+# аргументы одним массивом: через $args PowerShell 5.1 режет токены вида -c:v
+function FF([string[]]$a) {
+    & ffmpeg -hide_banner -v error -y $a
+    if ($LASTEXITCODE) { throw "ffmpeg: ошибка ($a)" }
+}
+function Fresh($in, $outFile) {
+    -not $Force -and (Test-Path $outFile) -and (Get-Item $outFile).LastWriteTime -ge (Get-Item $in).LastWriteTime
+}
+function Rel($path) { $path.Substring($Root.Length + 1).Replace('\', '/') }
+function Probe($file) {
+    $o = & ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate:format=duration -of default=nw=1 $file
+    $d = [double]::Parse((($o | Select-String '^duration=') -replace 'duration=', ''), $Inv)
+    $r = (($o | Select-String '^r_frame_rate=') -replace 'r_frame_rate=', '').Split('/')
+    @{ duration = [math]::Round($d, 3); fps = [math]::Round([double]::Parse($r[0], $Inv) / [double]::Parse($r[1], $Inv), 3) }
+}
+function Psnr($a, $b) {
+    $o = & ffmpeg -hide_banner -v error -i $a -i $b -lavfi '[0]scale=640:360[a];[1]scale=640:360[b];[a][b]psnr=stats_file=-' -f null -
+    if ("$o" -match 'psnr_avg:(inf|[\d.]+)') { if ($Matches[1] -eq 'inf') { 99 } else { [double]::Parse($Matches[1], $Inv) } } else { $null }
 }
 
-# Исходное имя (без расширения, пробелы и _ не важны) -> slug
-$Slugs = [ordered]@{
-  'дверь'                    = 'door'
-  'мастер-кадр (общий план)' = 'master'
-  'мастер-кадр'              = 'master'
-  'окно'                     = 'window'
-  'снежный шар'              = 'snowglobe'
-  'стакан молока'            = 'milk'
-  'письмо деду морозу'       = 'letter'
-  'мандарины'                = 'tangerines'
-  'рамка'                    = 'frame'
-  'часы'                     = 'clock'
-  'камин'                    = 'fireplace'
-  'елочная игрушка'          = 'ornament'
-  'ёлочная игрушка'          = 'ornament'
-  'железная дорога'          = 'train'
-  'подарок'                  = 'gift'
-  'мишка'                    = 'teddy'
-  'небо'                     = 'sky'
+$Rows = New-Object System.Collections.ArrayList
+$Produced = @{}
+$Warnings = New-Object System.Collections.ArrayList
+function Row($srcFile, $outFile, $status) {
+    $Produced[$outFile] = $true
+    $before = if ($srcFile) { [math]::Round((Get-Item $srcFile).Length / 1KB) } else { $null }
+    [void]$Rows.Add([pscustomobject]@{ 'Файл' = Rel $outFile; 'Было, КБ' = $before; 'Стало, КБ' = [math]::Round((Get-Item $outFile).Length / 1KB); 'Статус' = $status })
 }
 
-$ImageExt = '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'
-# Иконка сайта и картинка-превью для мессенджеров — обрабатываются отдельно
-$FaviconNames = 'favicon', 'icon'
-$OgNames = 'og-preview', 'og preview', 'og-image', 'og image', 'og'
-$SpecialImages = $FaviconNames + $OgNames
-$AudioExt = '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.opus'
-$VideoExt = '.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v'
-
-$Report = New-Object System.Collections.Generic.List[object]
-$Warnings = New-Object System.Collections.Generic.List[string]
-
-function Normalize([string]$name) {
-  return (($name -replace '_', ' ') -replace '\s+', ' ').Trim().ToLowerInvariant()
+# ---------- видео ----------
+function EncodeVideo($in, $outFile, [switch]$Reverse) {
+    $status = 'пропущен'
+    if (-not (Fresh $in $outFile)) {
+        $vf = if ($Reverse) { @('-vf', 'reverse') } else { @() }
+        FF (@('-i', $in) + $vf + $VideoArgs + @('-an', $outFile))
+        $status = if ($Reverse) { 'реверс' } else { 'сжат' }
+    }
+    # постеры: первый и последний кадр из уже сжатого видео (совпадают с тем, что увидит зритель)
+    $base = Join-Path $Out ('poster\' + [IO.Path]::GetFileNameWithoutExtension($outFile))
+    $first = "$base.first.webp"; $last = "$base.last.webp"
+    if (-not (Fresh $outFile $first)) { FF @('-i', $outFile, '-frames:v', '1', '-c:v', 'libwebp', '-quality', '85', $first) }
+    if (-not (Fresh $outFile $last)) { FF @('-sseof', '-0.5', '-i', $outFile, '-vf', 'reverse', '-frames:v', '1', '-c:v', 'libwebp', '-quality', '85', $last) }
+    $Produced[$first] = $true; $Produced[$last] = $true
+    Row $(if ($Reverse) { $null } else { $in }) $outFile $status
+    $info = Probe $outFile
+    [ordered]@{ src = Rel $outFile; duration = $info.duration; fps = $info.fps; first = Rel $first; last = Rel $last }
 }
 
-function Translit([string]$s) {
-  $map = @{
-    'а'='a';'б'='b';'в'='v';'г'='g';'д'='d';'е'='e';'ё'='e';'ж'='zh';'з'='z';'и'='i';'й'='y';
-    'к'='k';'л'='l';'м'='m';'н'='n';'о'='o';'п'='p';'р'='r';'с'='s';'т'='t';'у'='u';'ф'='f';
-    'х'='h';'ц'='ts';'ч'='ch';'ш'='sh';'щ'='sch';'ъ'='';'ы'='y';'ь'='';'э'='e';'ю'='yu';'я'='ya'
-  }
-  $sb = New-Object System.Text.StringBuilder
-  foreach ($ch in $s.ToLowerInvariant().ToCharArray()) {
-    $k = [string]$ch
-    if ($map.ContainsKey($k)) { [void]$sb.Append($map[$k]) } else { [void]$sb.Append($k) }
-  }
-  $r = $sb.ToString() -replace '[^a-z0-9.\-]+', '-' -replace '-{2,}', '-'
-  return $r.Trim('-')
+function EncodeImage($in, $outFile, $quality) {
+    $status = 'пропущен'
+    if (-not (Fresh $in $outFile)) { FF @('-i', $in, '-vf', "scale='min(2560,iw)':-1", '-c:v', 'libwebp', '-quality', "$quality", $outFile); $status = 'сжат' }
+    Row $in $outFile $status
 }
 
-function Get-Width([string]$file) {
-  $w = & ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file"
-  return [int]($w | Select-Object -First 1)
-}
+foreach ($d in 'video', 'poster', 'still', 'content', 'audio', 'image') { New-Item -ItemType Directory -Force (Join-Path $Out $d) | Out-Null }
 
-function Test-Fresh([string]$src, [string]$out) {
-  if ($Force) { return $false }
-  if (-not (Test-Path -LiteralPath $out)) { return $false }
-  return (Get-Item -LiteralPath $out).LastWriteTimeUtc -ge (Get-Item -LiteralPath $src).LastWriteTimeUtc
-}
+$stops = [ordered]@{}
+$edges = [ordered]@{}
+$srcVideo = Join-Path $Src 'video'
+$files = if (Test-Path $srcVideo) { Get-ChildItem $srcVideo -File | Sort-Object Name } else { @() }
+$trNames = $files | Where-Object { $_.Name -match "^tr__${IdRe}__${IdRe}$VideoExt" } | ForEach-Object { $_.BaseName }
 
-function Invoke-FFmpeg([string[]]$ffArgs) {
-  & ffmpeg -hide_banner -nostdin -v error -y @ffArgs
-  return ($LASTEXITCODE -eq 0)
-}
-
-function Add-Row([string]$src, [string]$out, [string]$note) {
-  $before = (Get-Item -LiteralPath $src).Length
-  $after = if (Test-Path -LiteralPath $out) { (Get-Item -LiteralPath $out).Length } else { 0 }
-  $Report.Add([pscustomobject]@{
-    'Исходник' = $src.Substring($SrcDir.Length + 1)
-    'Результат' = $out.Substring($DstDir.Length + 1)
-    'Было, КБ'  = [math]::Round($before / 1KB)
-    'Стало, КБ' = [math]::Round($after / 1KB)
-    'Сжатие'    = if ($after -gt 0) { '{0:P0}' -f (1 - $after / $before) } else { '—' }
-    'Примечание' = $note
-  })
-}
-
-function Convert-Image([string]$src, [string]$out, [int]$quality, [int]$maxWidth) {
-  $note = ''
-  if (Test-Fresh $src $out) { $note = 'без изменений' }
-  else {
-    $vf = if ($maxWidth -gt 0) { "scale='min($maxWidth,iw)':-2:flags=lanczos" } else { 'null' }
-    $ok = Invoke-FFmpeg @('-i', $src, '-vf', $vf, '-frames:v', '1', '-c:v', 'libwebp',
-                          '-quality', "$quality", '-compression_level', '6', $out)
-    if (-not $ok) { $note = 'ОШИБКА' }
-  }
-  Add-Row $src $out $note
-}
-
-function Convert-Video([string]$src, [string]$out) {
-  $note = ''
-  if (Test-Fresh $src $out) { $note = 'без изменений' }
-  else {
-    $ok = Invoke-FFmpeg @('-i', $src, '-vf', "scale='min(1920,iw)':-2:flags=lanczos",
-                          '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p',
-                          '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', $out)
-    if (-not $ok) { $note = 'ОШИБКА' }
-    # Постер (кадр на 0.5 с) — показывается до нажатия play
-    $poster = [System.IO.Path]::ChangeExtension($out, '.poster.webp')
-    [void](Invoke-FFmpeg @('-ss', '0.5', '-i', $src, '-frames:v', '1',
-                           '-vf', "scale='min(1920,iw)':-2", '-c:v', 'libwebp', '-quality', '80', $poster))
-  }
-  Add-Row $src $out $note
-}
-
-# Мастер-кадр режется на тайлы 2048 px в двух уровнях: полное разрешение (L0) и половина (L1).
-# Движок подгружает только те тайлы, куда смотрит камера. Плюс манифест tiles.js для index.html.
-function Convert-MasterTiles([string]$src) {
-  $TileSize = 2048
-  $outDir = Join-Path $DstDir 'master'
-  $manifest = Join-Path $outDir 'tiles.js'
-  $note = ''
-  if (Test-Fresh $src $manifest) { $note = 'без изменений' }
-  else {
-    if (Test-Path -LiteralPath $outDir) { Remove-Item -LiteralPath $outDir -Recurse -Force }
-    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-    $W = Get-Width $src
-    $H = [int]((& ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$src") | Select-Object -First 1)
-    $levels = @()
-    foreach ($lv in @(@{ n = 0; div = 1 }, @{ n = 1; div = 2 })) {
-      $lw = [int][math]::Floor($W / $lv.div)
-      $lh = [int][math]::Floor($H / $lv.div)
-      $cols = [int][math]::Ceiling($lw / $TileSize)
-      $rows = [int][math]::Ceiling($lh / $TileSize)
-      $count = $cols * $rows
-      Write-Host "    уровень L$($lv.n): ${lw}x${lh}, тайлов $cols x $rows"
-      # Один проход ffmpeg: split -> crop -> N выходов
-      $graph = if ($lv.div -gt 1) { "[0:v]scale=${lw}:${lh}:flags=lanczos,split=$count" } else { "[0:v]split=$count" }
-      for ($i = 0; $i -lt $count; $i++) { $graph += "[s$i]" }
-      $graph += ';'
-      $outs = @()
-      $i = 0
-      for ($r = 0; $r -lt $rows; $r++) {
-        for ($c = 0; $c -lt $cols; $c++) {
-          $x = $c * $TileSize; $y = $r * $TileSize
-          $tw = [math]::Min($TileSize, $lw - $x); $th = [math]::Min($TileSize, $lh - $y)
-          $graph += "[s$i]crop=${tw}:${th}:${x}:${y}[t$i];"
-          $outs += @('-map', "[t$i]", '-frames:v', '1', '-c:v', 'libwebp', '-quality', '88',
-                     '-compression_level', '6', (Join-Path $outDir "L$($lv.n)_${c}_${r}.webp"))
-          $i++
+foreach ($f in $files) {
+    if ($f.Name -match "^stop__($IdRe)$VideoExt") {
+        $id = $Matches[1]
+        $v = EncodeVideo $f.FullName (Join-Path $Out "video\stop__$id.mp4")
+        if (-not $stops[$id]) { $stops[$id] = [ordered]@{} }
+        $stops[$id].loop = $v.src; $stops[$id].poster = $v.first; $stops[$id].last = $v.last
+        $stops[$id].duration = $v.duration; $stops[$id].fps = $v.fps
+    }
+    elseif ($f.Name -match "^tr__($IdRe)__($IdRe)$VideoExt") {
+        $a = $Matches[1]; $b = $Matches[2]
+        $edges["$a>$b"] = EncodeVideo $f.FullName (Join-Path $Out "video\tr__${a}__$b.mp4")
+        if ($trNames -notcontains "tr__${b}__$a") {
+            $r = EncodeVideo $f.FullName (Join-Path $Out "video\tr__${b}__$a.rev.mp4") -Reverse
+            $r.reverseOf = "$a>$b"
+            $edges["$b>$a"] = $r
         }
-      }
-      $graph = $graph.TrimEnd(';')
-      if (-not (Invoke-FFmpeg (@('-i', $src, '-filter_complex', $graph) + $outs))) { $note = 'ОШИБКА' }
-      $levels += "    { width: $lw, height: $lh, cols: $cols, rows: $rows, path: `"assets/master/L$($lv.n)_{c}_{r}.webp`" }"
     }
-    $js = @(
-      '// Сгенерировано scripts/optimize.ps1 — не редактировать руками.',
-      'window.MASTER_TILES = {',
-      "  width: $W, height: $H, tile: $TileSize,",
-      '  preview: "assets/master-2k.webp",',
-      '  levels: [',
-      ($levels -join ",`r`n"),
-      '  ]',
-      '};'
-    ) -join "`r`n"
-    [System.IO.File]::WriteAllText($manifest, $js + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
-  }
-  $tilesSize = (Get-ChildItem -LiteralPath $outDir -Filter '*.webp' | Measure-Object -Property Length -Sum).Sum
-  $before = (Get-Item -LiteralPath $src).Length
-  $Report.Add([pscustomobject]@{
-    'Исходник'   = $src.Substring($SrcDir.Length + 1)
-    'Результат'  = 'master\L0_*, L1_* (тайлы)'
-    'Было, КБ'   = [math]::Round($before / 1KB)
-    'Стало, КБ'  = [math]::Round($tilesSize / 1KB)
-    'Сжатие'     = '{0:P0}' -f (1 - $tilesSize / $before)
-    'Примечание' = $note
-  })
-}
-
-New-Item -ItemType Directory -Force -Path $DstDir | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $DstDir 'content') | Out-Null
-
-Write-Host "Сжатие ассетов: $SrcDir -> $DstDir" -ForegroundColor Cyan
-if ($Force) { Write-Host 'Режим -Force: пересобираю всё.' }
-
-# --- Картинки сцены ---------------------------------------------------------
-$seen = @{}
-$rootFiles = Get-ChildItem -LiteralPath $SrcDir -File | Sort-Object Name
-foreach ($f in $rootFiles) {
-  $ext = $f.Extension.ToLowerInvariant()
-  if ($ImageExt -notcontains $ext) { continue }
-  $key = Normalize $f.BaseName
-  if ($SpecialImages -contains $key) { continue } # иконка и превью — ниже, отдельным блоком
-  if ($Slugs.Contains($key)) {
-    $slug = $Slugs[$key]
-  }
-  else {
-    # Новая картинка: slug из имени файла (транслитерация), например «Книжная полка.png» -> knizhnaya-polka
-    $slug = Translit $f.BaseName
-    if (-not $slug) { $Warnings.Add("Не удалось получить slug из имени '$($f.Name)' — пропущено."); continue }
-    $Warnings.Add("Новая картинка '$($f.Name)' -> $slug.webp (используйте bg: `"$slug`" в config.js).")
-  }
-  if ($seen.ContainsKey($slug)) {
-    $Warnings.Add("Для '$slug' найдено несколько исходников ('$($seen[$slug])' и '$($f.Name)'). Используется последний по алфавиту.")
-  }
-  $seen[$slug] = $f.Name
-  $label = if ($slug -eq 'master') { 'master-2k.webp + master (тайлы)' } else { "$slug.webp" }
-  Write-Host "  $($f.Name) -> $label"
-
-  if ($slug -eq 'master') {
-    $w = Get-Width $f.FullName
-    if ($w -lt 4000) {
-      $Warnings.Add("Мастер-кадр шириной $w px (< 4000). Камера сильно зумится — нужен апскейл, иначе крупные зумы будут мыльными.")
+    elseif ($f.Name -match "^still__($IdRe)$ImageExt") {
+        $id = $Matches[1]
+        $o = Join-Path $Out "still\$id.webp"
+        EncodeImage $f.FullName $o 82
+        if (-not $stops[$id]) { $stops[$id] = [ordered]@{} }
+        $stops[$id].still = Rel $o
+        if (-not $stops[$id].poster) { $stops[$id].poster = Rel $o }
     }
-    # Лёгкая копия для быстрого старта и дальних планов
-    Convert-Image $f.FullName (Join-Path $DstDir 'master-2k.webp') 82 2560
-    # Полное разрешение (тайлами) — в него камера зумится сильнее всего
-    Convert-MasterTiles $f.FullName
-  }
-  else {
-    Convert-Image $f.FullName (Join-Path $DstDir "$slug.webp") 82 2560
-  }
+    else { [void]$Warnings.Add("Проигнорирован (имя не по соглашению): video/$($f.Name)") }
 }
 
-$required = @('door', 'master') + @($Slugs.Values | Where-Object { $_ -notin 'door', 'master' } | Select-Object -Unique)
-foreach ($s in $required) {
-  if (-not $seen.ContainsKey($s)) { $Warnings.Add("Нет исходника для '$s'.") }
-}
-
-# --- Иконка сайта и превью для мессенджеров ----------------------------------
-function Find-Special([string[]]$names) {
-  return $rootFiles | Where-Object {
-    ($ImageExt -contains $_.Extension.ToLowerInvariant()) -and ($names -contains (Normalize $_.BaseName))
-  } | Select-Object -First 1
-}
-
-$fav = Find-Special $FaviconNames
-if ($fav) {
-  $iconsDir = Join-Path $DstDir 'icons'
-  New-Item -ItemType Directory -Force -Path $iconsDir | Out-Null
-  Write-Host "  $($fav.Name) -> icons\favicon.ico, icon-192.png, apple-touch-icon.png"
-  # Иконка должна быть квадратной: дополняем прозрачными полями по центру
-  $square = "format=rgba,pad='max(iw,ih)':'max(iw,ih)':'(ow-iw)/2':'(oh-ih)/2':color=0x00000000"
-
-  # favicon.ico: 16, 32 и 48 px в одном файле (вкладка браузера, закладки, поиск)
-  $ico = Join-Path $iconsDir 'favicon.ico'
-  $note = ''
-  if (Test-Fresh $fav.FullName $ico) { $note = 'без изменений' }
-  else {
-    $graph = "[0:v]$square,split=3[a][b][c];[a]scale=16:16:flags=lanczos[s16];[b]scale=32:32:flags=lanczos[s32];[c]scale=48:48:flags=lanczos[s48]"
-    if (-not (Invoke-FFmpeg @('-i', $fav.FullName, '-filter_complex', $graph,
-        '-map', '[s16]', '-map', '[s32]', '-map', '[s48]', '-c:v', 'png', $ico))) { $note = 'ОШИБКА' }
-  }
-  Add-Row $fav.FullName $ico $note
-  # Копия в корень сайта: некоторые сервисы запрашивают /favicon.ico напрямую
-  if (Test-Path -LiteralPath $ico) { Copy-Item -LiteralPath $ico -Destination (Join-Path $Root 'favicon.ico') -Force }
-
-  # 192 px — Android и вкладки на экранах высокой плотности
-  $png192 = Join-Path $iconsDir 'icon-192.png'
-  $note = ''
-  if (Test-Fresh $fav.FullName $png192) { $note = 'без изменений' }
-  elseif (-not (Invoke-FFmpeg @('-i', $fav.FullName, '-vf', "$square,scale=192:192:flags=lanczos", '-frames:v', '1', $png192))) { $note = 'ОШИБКА' }
-  Add-Row $fav.FullName $png192 $note
-
-  # 180 px для iPhone («На экран Домой»): iOS заливает прозрачность чёрным, поэтому свой фон
-  $apple = Join-Path $iconsDir 'apple-touch-icon.png'
-  $note = ''
-  if (Test-Fresh $fav.FullName $apple) { $note = 'без изменений' }
-  else {
-    $graph = "[0:v]$square,scale=148:148:flags=lanczos[fg];color=c=0x1a100b:s=180x180[bg];[bg][fg]overlay=16:16:format=auto,format=rgb24"
-    if (-not (Invoke-FFmpeg @('-i', $fav.FullName, '-filter_complex', $graph, '-frames:v', '1', $apple))) { $note = 'ОШИБКА' }
-  }
-  Add-Row $fav.FullName $apple $note
-}
-else {
-  $Warnings.Add('Нет assets_src/favicon.png — у вкладки не будет иконки.')
-}
-
-$og = Find-Special $OgNames
-if ($og) {
-  # Превью ссылки (Telegram, WhatsApp, VK): JPEG до ~300 КБ — иначе WhatsApp может не показать картинку
-  $ogOut = Join-Path $DstDir 'og-preview.jpg'
-  Write-Host "  $($og.Name) -> og-preview.jpg"
-  $note = ''
-  if (Test-Fresh $og.FullName $ogOut) { $note = 'без изменений' }
-  else {
-    foreach ($q in 3, 5, 7, 9) {
-      $ok = Invoke-FFmpeg @('-i', $og.FullName, '-vf', "scale='min(1200,iw)':-2:flags=lanczos,format=yuvj420p",
-                            '-frames:v', '1', '-q:v', "$q", $ogOut)
-      if (-not $ok) { $note = 'ОШИБКА'; break }
-      if ((Get-Item -LiteralPath $ogOut).Length -le 300KB) { break }
+# ---------- контент (картинки и видео для шаблонов) ----------
+$srcContent = Join-Path $Src 'content'
+if (Test-Path $srcContent) {
+    foreach ($f in Get-ChildItem $srcContent -File | Sort-Object Name) {
+        if ($f.Name -match $ImageExt) { EncodeImage $f.FullName (Join-Path $Out "content\$($f.BaseName).webp") 82 }
+        elseif ($f.Name -match $VideoExt) {
+            $o = Join-Path $Out "content\$($f.BaseName).mp4"; $status = 'пропущен'
+            if (-not (Fresh $f.FullName $o)) { FF (@('-i', $f.FullName) + $VideoArgs + @('-c:a', 'aac', '-b:a', '128k', $o)); $status = 'сжат' }
+            Row $f.FullName $o $status
+        }
+        else { [void]$Warnings.Add("Проигнорирован: content/$($f.Name)") }
     }
-  }
-  Add-Row $og.FullName $ogOut $note
-  $ow = Get-Width $og.FullName
-  if ($ow -lt 600) { $Warnings.Add("og-preview шириной $ow px — мессенджеры покажут маленькое превью. Лучше 1200x630 или 960x540.") }
-}
-else {
-  $Warnings.Add('Нет assets_src/og-preview.png — при отправке ссылки не будет картинки.')
 }
 
-# --- Музыка -----------------------------------------------------------------
-$audio = @($rootFiles | Where-Object { $AudioExt -contains $_.Extension.ToLowerInvariant() })
-if ($audio.Count -eq 0) {
-  $Warnings.Add('Аудиофайл в assets_src/ не найден — музыки не будет.')
-}
-else {
-  if ($audio.Count -gt 1) {
-    $Warnings.Add("Найдено несколько аудиофайлов, использую '$($audio[0].Name)'. Лишние уберите из assets_src/.")
-  }
-  $a = $audio[0].FullName
-  Write-Host "  $($audio[0].Name) -> music.mp3 + music.ogg"
-  $mp3 = Join-Path $DstDir 'music.mp3'
-  $ogg = Join-Path $DstDir 'music.ogg'
-  $note = ''
-  if (Test-Fresh $a $mp3) { $note = 'без изменений' }
-  elseif (-not (Invoke-FFmpeg @('-i', $a, '-vn', '-map_metadata', '-1', '-c:a', 'libmp3lame', '-b:a', '160k', $mp3))) { $note = 'ОШИБКА' }
-  Add-Row $a $mp3 $note
-  $note = ''
-  if (Test-Fresh $a $ogg) { $note = 'без изменений' }
-  elseif (-not (Invoke-FFmpeg @('-i', $a, '-vn', '-map_metadata', '-1', '-c:a', 'libopus', '-b:a', '112k', $ogg))) { $note = 'ОШИБКА' }
-  Add-Row $a $ogg $note
+# ---------- музыка ----------
+$music = $null
+$m = Get-ChildItem (Join-Path $Src 'audio') -File -Filter 'music.*' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($m) {
+    $o = Join-Path $Out 'audio\music.mp3'; $status = 'пропущен'
+    if (-not (Fresh $m.FullName $o)) { FF @('-i', $m.FullName, '-vn', '-c:a', 'libmp3lame', '-b:a', '160k', $o); $status = 'сжат' }
+    Row $m.FullName $o $status
+    $music = Rel $o
 }
 
-# --- Контент слайдов: assets_src/content -> assets/content -------------------
-$contentSrc = Join-Path $SrcDir 'content'
-if (Test-Path -LiteralPath $contentSrc) {
-  $files = Get-ChildItem -LiteralPath $contentSrc -File -Recurse | Sort-Object FullName
-  foreach ($f in $files) {
-    $ext = $f.Extension.ToLowerInvariant()
-    $relDir = $f.DirectoryName.Substring($contentSrc.Length).TrimStart('\', '/')
-    $outDir = Join-Path (Join-Path $DstDir 'content') (($relDir -split '[\\/]' | ForEach-Object { Translit $_ }) -join '\')
-    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-    $base = Translit $f.BaseName
-    if ($ImageExt -contains $ext) {
-      $out = Join-Path $outDir "$base.webp"
-      Write-Host "  $($f.FullName.Substring($SrcDir.Length + 1)) -> $($out.Substring($DstDir.Length + 1))"
-      Convert-Image $f.FullName $out 82 1920
+# ---------- фавикон и превью для соцсетей ----------
+foreach ($f in Get-ChildItem (Join-Path $Src 'image') -File -ErrorAction SilentlyContinue) {
+    if ($f.BaseName -eq 'og-preview') {
+        $o = Join-Path $Out 'image\og-preview.jpg'; $status = 'пропущен'
+        if (-not (Fresh $f.FullName $o)) { FF @('-i', $f.FullName, '-q:v', '3', $o); $status = 'сжат' }
+    } else {
+        $o = Join-Path $Out "image\$($f.Name)"; $status = 'пропущен'
+        if (-not (Fresh $f.FullName $o)) { Copy-Item $f.FullName $o -Force; $status = 'скопирован' }
     }
-    elseif ($VideoExt -contains $ext) {
-      $out = Join-Path $outDir "$base.mp4"
-      Write-Host "  $($f.FullName.Substring($SrcDir.Length + 1)) -> $($out.Substring($DstDir.Length + 1))"
-      Convert-Video $f.FullName $out
-    }
-    else {
-      $Warnings.Add("content: неподдерживаемый файл '$($f.Name)' — пропущен.")
-    }
-  }
+    Row $f.FullName $o $status
 }
 
-# --- Отчёт ------------------------------------------------------------------
-Write-Host ''
-$Report | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-$totalBefore = ($Report | Sort-Object 'Исходник' -Unique | Measure-Object -Property 'Было, КБ' -Sum).Sum
-$totalAfter  = ($Report | Measure-Object -Property 'Стало, КБ' -Sum).Sum
-Write-Host ("Итого: {0:N0} КБ -> {1:N0} КБ" -f $totalBefore, $totalAfter) -ForegroundColor Cyan
-
-if ($Warnings.Count -gt 0) {
-  Write-Host ''
-  foreach ($w in $Warnings) { Write-Host "ВНИМАНИЕ: $w" -ForegroundColor Yellow }
+# ---------- проверки стыков ----------
+foreach ($id in $stops.Keys) {
+    $s = $stops[$id]
+    if (-not $s.loop) { continue }
+    $p = Psnr (Join-Path $Root $s.poster) (Join-Path $Root $s.last)
+    $s.loopPsnr = if ($p -ne $null) { [math]::Round($p, 1) } else { $null }
+    if ($p -ne $null -and $p -lt $LoopPsnrWarn) {
+        [void]$Warnings.Add(("Цикл '{0}': первый и последний кадр различаются (PSNR {1:N1} дБ) - возможен рывок на стыке. Попробуй loopMode: 'pingpong' или перегенерируй цикл." -f $id, $p))
+    }
 }
-if ($Report | Where-Object { $_.'Примечание' -eq 'ОШИБКА' }) { exit 1 }
+foreach ($key in $edges.Keys) {
+    $e = $edges[$key]; $to = $key.Split('>')[1]
+    if (-not $stops[$to] -or -not $stops[$to].loop) { continue }
+    $p = Psnr (Join-Path $Root $e.last) (Join-Path $Root $stops[$to].poster)
+    $e.joinPsnr = if ($p -ne $null) { [math]::Round($p, 1) } else { $null }
+    if ($p -ne $null -and $p -lt $JoinPsnrWarn) {
+        $hint = if ($e.reverseOf) { "склейка ребра '$($e.reverseOf)' зеркалится на старте" } else { "поставь join: 'push' в config.js или догенерируй недостающий кусок" }
+        [void]$Warnings.Add(("Пролёт '{0}' не стыкуется с циклом '{1}' (PSNR {2:N1} дБ): {3}." -f $key, $to, $p, $hint))
+    }
+}
+
+# ---------- удаление устаревших файлов (исходник удалён или переименован) ----------
+foreach ($d in 'video', 'poster', 'still', 'content', 'audio', 'image') {
+    foreach ($f in Get-ChildItem (Join-Path $Out $d) -File) {
+        if (-not $Produced[$f.FullName]) { Remove-Item $f.FullName; Write-Host "Удалён устаревший: $(Rel $f.FullName)" -ForegroundColor DarkGray }
+    }
+}
+
+# ---------- манифест ----------
+$manifest = [ordered]@{ stops = $stops; edges = $edges; music = $music }
+$json = $manifest | ConvertTo-Json -Depth 6
+$js = "// Сгенерировано scripts/optimize.ps1 - не редактировать вручную.`nwindow.MANIFEST = $json;`n"
+[IO.File]::WriteAllText((Join-Path $Out 'manifest.js'), $js, (New-Object Text.UTF8Encoding $false))
+
+# ---------- отчёт ----------
+$Rows | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+$b = ($Rows | Where-Object { $_.'Было, КБ' } | Measure-Object 'Было, КБ' -Sum).Sum
+$a = ($Rows | Measure-Object 'Стало, КБ' -Sum).Sum
+Write-Host ("Итого: исходники {0:N0} КБ -> {1:N0} КБ (с реверсами, без постеров)" -f $b, $a)
+Write-Host ("Остановок: {0}, рёбер: {1}, музыка: {2}" -f $stops.Count, $edges.Count, $(if ($music) { 'есть' } else { 'нет' }))
+foreach ($w in $Warnings) { Write-Host "! $w" -ForegroundColor Yellow }
+Write-Host 'Готово: assets/manifest.js' -ForegroundColor Green
