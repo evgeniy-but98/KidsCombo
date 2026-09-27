@@ -158,7 +158,7 @@
   }
   const stopLayer = id => layer('stop:' + id);
   function dispose(L) {
-    for (const v of L.videos) { v.pause(); v.removeAttribute('src'); v.load(); }
+    for (const v of L.videos) { v._want = false; v.pause(); v.removeAttribute('src'); v.load(); }
     L.el.remove();
     layers.delete(L.k);
   }
@@ -166,7 +166,7 @@
     L.el.style.opacity = 0;
     L.el.getAnimations({ subtree: true }).forEach(x => x.cancel());
     if (L.kind === 'stop') stopLoop(L);
-    else { L.el.pause(); L.el.currentTime = 0; }
+    else { L.el._want = false; L.el.pause(); L.el.currentTime = 0; }
   }
 
   // Готовность: видео загружено и стоит на кадре 0 (кадр уже отрисован). false по таймауту.
@@ -181,8 +181,9 @@
       const done = r => { clearTimeout(t); clearTimeout(kick); evs.forEach(e => v.removeEventListener(e, chk)); res(r); };
       evs.forEach(e => v.addEventListener(e, chk));
       const t = setTimeout(() => done(ok()), ms);
-      // iOS игнорирует preload и не грузит видео без play(): muted play → pause запускает загрузку
-      const kick = setTimeout(() => { if (!ok()) v.play().then(() => { v.pause(); v.currentTime = 0; }, () => {}); }, 1200);
+      // iOS игнорирует preload и не грузит видео без play(): muted play → pause запускает загрузку.
+      // Видео, которое уже запустили по-настоящему (v._want, см. play), не трогаем — иначе цикл застынет на кадре 0.
+      const kick = setTimeout(() => { if (!ok() && !v._want) v.play().then(() => { if (!v._want) { v.pause(); v.currentTime = 0; } }, () => {}); }, 1200);
     });
   }
   const readyLayer = L => Promise.all(L.videos.map(v => ready(v))).then(r => r.every(Boolean));
@@ -192,6 +193,7 @@
   const resetBlock = () => { unblocked = new Promise(r => { release = r; }); };
   resetBlock();
   function play(v) {
+    v._want = true; // видео должно играть; сбрасывается там, где его останавливают намеренно
     return v.play().catch(err => {
       if (err.name !== 'NotAllowedError') return; // AbortError: play() прерван pause() — это нормально
       if (!state.blocked) { state.blocked = true; if (P.onblocked) P.onblocked(); }
@@ -252,14 +254,14 @@
         if (L.token !== token) break;
         next.style.zIndex = 2; cur.style.zIndex = 1; // второй элемент (кадр 0, пауза) выходит наверх
         [cur, next] = [next, cur];
-        next.pause(); next.currentTime = 0; // первый перематывается под ним
+        next._want = false; next.pause(); next.currentTime = 0; // первый перематывается под ним
       }
     })();
   }
   function stopLoop(L) {
     L.token = null;
     if (L.kb) { L.kb.cancel(); L.kb = null; }
-    for (const v of L.videos) { v.pause(); v.currentTime = 0; }
+    for (const v of L.videos) { v._want = false; v.pause(); v.currentTime = 0; }
   }
   // waitLoopEnd: дождаться последнего кадра текущей итерации цикла, но не дольше maxWait
   function loopEnd(L, maxWait) {

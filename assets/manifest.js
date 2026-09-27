@@ -1,4 +1,4 @@
-// Сгенерировано scripts/optimize.ps1 - не редактировать вручную.
+// Сгенерировано scripts/optimize.ps1 - скрипт только дополняет файл; вручную можно лишь удалить ненужную запись (см. README).
 window.MANIFEST = {
     "stops":  {
                   "closeup":  {
@@ -40,7 +40,39 @@ window.MANIFEST = {
                                  "duration":  7.042,
                                  "fps":  24,
                                  "loopPsnr":  38.1
-                             }
+                             },
+                  "scene06":  {
+                                  "loop":  "assets/video/stop__scene06.mp4",
+                                  "poster":  "assets/poster/stop__scene06.first.webp",
+                                  "last":  "assets/poster/stop__scene06.last.webp",
+                                  "duration":  5.042,
+                                  "fps":  24,
+                                  "loopPsnr":  43.4
+                              },
+                  "scene07":  {
+                                  "loop":  "assets/video/stop__scene07.mp4",
+                                  "poster":  "assets/poster/stop__scene07.first.webp",
+                                  "last":  "assets/poster/stop__scene07.last.webp",
+                                  "duration":  5.042,
+                                  "fps":  24,
+                                  "loopPsnr":  42.3
+                              },
+                  "scene08":  {
+                                  "loop":  "assets/video/stop__scene08.mp4",
+                                  "poster":  "assets/poster/stop__scene08.first.webp",
+                                  "last":  "assets/poster/stop__scene08.last.webp",
+                                  "duration":  5.042,
+                                  "fps":  24,
+                                  "loopPsnr":  37.3
+                              },
+                  "scene09":  {
+                                  "loop":  "assets/video/stop__scene09.mp4",
+                                  "poster":  "assets/poster/stop__scene09.first.webp",
+                                  "last":  "assets/poster/stop__scene09.last.webp",
+                                  "duration":  4.042,
+                                  "fps":  24,
+                                  "loopPsnr":  39.4
+                              }
               },
     "edges":  {
                   "master\u003ecloseup":  {

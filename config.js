@@ -3,7 +3,7 @@
 window.CONFIG = {
   // Порядок слайдов: кнопки вперёд/назад, точки прогресса, location.hash.
   // id без файлов в манифесте показывается заглушкой «кадр в работе».
-  tour: ["intro", "master", "closeup", "globes", "empty", "scene06", "scene07", "scene08", "scene09", "scene10"],
+  tour: ["intro", "master", "closeup", "globes", "empty", "scene06", "scene07", "scene08", "scene09"],
 
   defaults: {
     join: "crossfade",   // как пролёт переходит в цикл: cut | crossfade | push
@@ -94,10 +94,6 @@ window.CONFIG = {
         layout: "gallery", side: "center", theme: "dark",
         kicker: "Сцена 07",
         title: "Сцена 07 — scene07",
-        images: [
-          { caption: "Кадр 1" }, { caption: "Кадр 2" }, { caption: "Кадр 3" },
-          { caption: "Кадр 4" }, { caption: "Кадр 5" }, { caption: "Кадр 6" },
-        ],
       },
     },
 

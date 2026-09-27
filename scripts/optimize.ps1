@@ -1,16 +1,19 @@
 ﻿# Сжатие ассетов: assets_src/ -> assets/ + дополнение assets/manifest.js
 # Запуск: scripts\optimize.cmd (двойной клик) или
-#   powershell -ExecutionPolicy Bypass -File scripts\optimize.ps1 [-DryRun] [-Force]
+#   powershell -ExecutionPolicy Bypass -File scripts\optimize.ps1 [-DryRun] [-Force] [-Only <имя>[,<имя>]] [-MaxHeight <px>]
 # Скрипт только дополняет: в assets_src/ достаточно положить новые или обновлённые материалы.
 #   Всё, что уже есть в assets/ и в manifest.js (включая музыку), сохраняется: ничего не удаляется,
 #   файлы без исходника в assets_src/ не перекодируются. Пропал файл из манифеста -> остановка с ошибкой.
-#   -DryRun  показать план и ничего не менять (FFmpeg не нужен)
-#   -Force   перекодировать исходники из assets_src/, даже если готовый файл новее исходника
+#   -DryRun     показать план и ничего не менять (FFmpeg не нужен)
+#   -Force      перекодировать исходники из assets_src/, даже если готовый файл новее исходника
+#   -Only       обработать только эти исходники (имя без расширения, например stop__scene08)
+#   -MaxHeight  уменьшить видео выше этой высоты (например 720); по умолчанию разрешение исходника
 # Соглашение об именах в assets_src/video/:
 #   stop__<id>.mp4        цикл остановки
 #   tr__<from>__<to>.mp4  пролёт (обратный генерируется реверсом, если нет ручного tr__<to>__<from>)
 #   still__<id>.webp|png|jpg  статичная картинка для остановки без цикла
-param([switch]$Force, [switch]$DryRun)
+param([switch]$Force, [switch]$DryRun, [string[]]$Only, [int]$MaxHeight = 0)
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })   # -File передаёт "a,b" одной строкой
 
 $Root = Split-Path $PSScriptRoot -Parent
 $Src = Join-Path $Root 'assets_src'
@@ -71,6 +74,7 @@ $Jobs = New-Object System.Collections.ArrayList
 $Warnings = New-Object System.Collections.ArrayList   # жёлтым: стоит проверить
 $Notes = New-Object System.Collections.ArrayList      # серым: для сведения
 function Plan($kind, $key, $source, $target, $listed, $reverseOf) {
+    if ($Only.Count -and $Only -notcontains [IO.Path]::GetFileNameWithoutExtension($source)) { return }
     $action = if (-not (Test-Path -LiteralPath $target)) { 'новый' }
         elseif ($Force -or (Get-Item -LiteralPath $target).LastWriteTime -lt (Get-Item -LiteralPath $source).LastWriteTime) { 'обновить' }
         elseif ($listed) { 'пропустить' }
@@ -139,13 +143,15 @@ function Kept {
 
 if (-not $Jobs.Count) {
     Kept; Messages
-    Write-Host 'В assets_src/ нет исходников - ничего не изменено.' -ForegroundColor Green
+    Write-Host $(if ($Only.Count) { "Под -Only ($($Only -join ', ')) не подошёл ни один исходник - ничего не изменено." } else { 'В assets_src/ нет исходников с подходящими именами - ничего не изменено.' }) -ForegroundColor Green
     exit 0
 }
 
 $Jobs | ForEach-Object {
     [pscustomobject]@{ 'Исходник' = Rel $_.source; 'Результат' = Rel $_.target; 'Действие' = $_.action + $(if ($_.reverseOf) { ' (реверс)' }) }
 } | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+if ($Only.Count) { Write-Host "Только исходники: $($Only -join ', ')" }
+if ($MaxHeight -gt 0) { Write-Host "Видео выше $MaxHeight px уменьшаются до $MaxHeight px по высоте" }
 
 if ($DryRun) {
     Kept; Messages
@@ -174,6 +180,8 @@ function FFTo([string[]]$a, $outFile) {
     FF ($a + @($t))
     Move-Item -LiteralPath $t $outFile -Force -ErrorAction Stop
 }
+# -MaxHeight: уменьшение по высоте, ширина чётная; видео ниже порога не увеличиваются
+function ScaleVf { if ($MaxHeight -gt 0) { "scale=-2:'min($MaxHeight,ih)'" } }
 function Fresh($in, $outFile) {
     -not $Force -and (Test-Path -LiteralPath $outFile) -and (Get-Item -LiteralPath $outFile).LastWriteTime -ge (Get-Item -LiteralPath $in).LastWriteTime
 }
@@ -198,7 +206,8 @@ function Row($j) {
 
 function EncodeVideo($j) {
     if ($j.action -ne 'в манифест') {
-        $a = @('-i', $j.source); if ($j.reverseOf) { $a += '-vf', 'reverse' }
+        $vf = @(ScaleVf) + $(if ($j.reverseOf) { @('reverse') } else { @() })
+        $a = @('-i', $j.source); if ($vf.Count) { $a += '-vf', ($vf -join ',') }
         FFTo ($a + $VideoArgs + @('-an')) $j.target
     }
     # постеры: первый и последний кадр из уже сжатого видео (совпадают с тем, что увидит зритель)
@@ -242,7 +251,10 @@ try {
                 if (-not $stops[$j.key].loop) { $stops[$j.key].poster = Rel $j.target }
             }
             'content-image' { EncodeImage $j 82 }
-            'content-video' { if ($encode) { FFTo (@('-i', $j.source) + $VideoArgs + @('-c:a', 'aac', '-b:a', '128k')) $j.target }; Row $j }
+            'content-video' {
+                $a = @('-i', $j.source); if ($MaxHeight -gt 0) { $a += '-vf', (ScaleVf) }
+                if ($encode) { FFTo ($a + $VideoArgs + @('-c:a', 'aac', '-b:a', '128k')) $j.target }; Row $j
+            }
             'music' { if ($encode) { FFTo @('-i', $j.source, '-vn', '-c:a', 'libmp3lame', '-b:a', '160k') $j.target }; Row $j; $music = Rel $j.target }
             'og' { FFTo @('-i', $j.source, '-q:v', '3') $j.target; Row $j }
             'copy' { Copy-Item -LiteralPath $j.source $j.target -Force -ErrorAction Stop; Row $j }
