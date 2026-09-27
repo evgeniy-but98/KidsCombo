@@ -26,7 +26,7 @@
     nav.cooldownUntil = performance.now() + 400;
     const q = nav.queued;
     nav.queued = 0;
-    if (q) step(q); else showText(id); // в очереди следующий шаг — текст не мелькает
+    if (q) step(q); else showTextLater(id); // в очереди следующий шаг — текст не мелькает
   }
   // Шаг по туру. Во время пролёта: в ту же сторону — в очередь (одна), в обратную — игнор.
   function step(dir) {
@@ -39,7 +39,7 @@
     await hideText();
     await P.show(id);
     arrive(id);
-    showText(id);
+    showTextLater(id);
   }
   function arrive(id) {
     current = id;
@@ -68,6 +68,9 @@
     count.textContent = `${pad(i + 1)} / ${pad(tour.length)}`;
     dots.querySelectorAll('.nav__dot').forEach((b, j) => b.toggleAttribute('aria-current', j === i));
     document.body.dataset.slide = current;
+    const mf = (C.stops[current] || {}).mobileFrame || {}; // кадр целиком на узком экране
+    document.body.dataset.fit = mf.fit || '';
+    document.body.dataset.frame = mf.frame || '';
     document.body.classList.toggle('on-cover', current === COVER);
   }
   prev.addEventListener('click', () => step(-1));
@@ -163,14 +166,60 @@
     box.append(v, b);
     return box;
   }
+  // Палитра — ориентиры по цвету: образец и название. Точные HEX остаются в config.js, в интерфейс не выводятся.
+  function palette(colors, cls) {
+    const ul = el('ul', cls);
+    list(colors).forEach(col => {
+      const li = el('li', 'swatch'), chip = el('span', 'swatch__chip');
+      chip.style.background = col.hex;
+      li.append(chip);
+      if (col.name) li.append(el('span', 'swatch__name', col.name));
+      ul.append(li);
+    });
+    return ul;
+  }
+  // Раскрываемый блок под текстом плашки (палитра «Свет и цвет»); на телефоне — отдельная область под заголовком
+  function more(m, sec) {
+    const d = el('details', 'slide__more');
+    d.append(el('summary', null, m.title), palette(m.colors, 'palette palette--compact'));
+    d.addEventListener('toggle', () => { if (d.open && sec.classList.contains('is-open')) setOpen(sec, false); });
+    return d;
+  }
+  // Свёрнутая плашка на телефоне: заголовок + «Читать», текст раскрывается по нажатию.
+  // Текст и палитра на телефоне не раскрываются одновременно — иначе вместе закроют лицо.
+  function setOpen(sec, on) {
+    sec.classList.toggle('is-open', on);
+    const b = sec.querySelector('.slide__open');
+    b.setAttribute('aria-expanded', on);
+    b.textContent = on ? 'Свернуть' : 'Читать';
+    const d = sec.querySelector('.slide__more');
+    if (on && d && d.open) d.open = false;
+  }
+  function opener(sec) {
+    const b = el('button', 'slide__open', 'Читать');
+    b.type = 'button';
+    b.setAttribute('aria-expanded', 'false');
+    b.addEventListener('click', () => setOpen(sec, !sec.classList.contains('is-open')));
+    return b;
+  }
   function render(c) {
     const sec = el('section', 'slide'), block = el('div', 'slide__block'), parts = [];
     sec.dataset.layout = c.layout;
     sec.dataset.side = c.side || 'left';
     sec.dataset.theme = c.theme || 'dark';
+    if (c.size) sec.dataset.size = c.size;
+    if (c.scrim === false) sec.dataset.scrim = 'off';
+    if (c.box) { // место в долях видеокадра, см. style.css (#overlay --fw/--fh)
+      sec.dataset.box = c.box.y == null ? 'bottom' : 'top';
+      sec.dataset.mobile = c.mobile || 'top';
+      sec.style.setProperty('--bx', c.box.x);
+      sec.style.setProperty('--bw', c.box.w);
+      if (c.box.y != null) sec.style.setProperty('--by', c.box.y);
+    }
     const texts = () => list(c.text).forEach(t => parts.push(el('p', 'slide__text', t)));
     if (c.kicker) parts.push(el('p', 'slide__kicker', c.kicker));
     if (c.title && c.layout !== 'quote') parts.push(el(c.layout === 'title' ? 'h1' : 'h2', 'slide__title', c.title));
+    if (c.box && (c.text || c.more)) parts.push(opener(sec));
     switch (c.layout) {
       case 'title':
         if (c.text) parts.push(el('p', 'slide__lead', list(c.text).join(' ')));
@@ -194,20 +243,10 @@
         if (c.caption) parts.push(el('p', 'media__caption', c.caption));
         break;
       }
-      case 'palette': {
+      case 'palette':
         texts();
-        const ul = el('ul', 'palette');
-        list(c.colors).forEach(col => {
-          const li = el('li', 'swatch'), chip = el('span', 'swatch__chip');
-          chip.style.background = col.hex;
-          li.append(chip);
-          if (col.name) li.append(el('span', 'swatch__name', col.name));
-          li.append(el('span', 'swatch__hex', col.hex.toUpperCase()));
-          ul.append(li);
-        });
-        parts.push(ul);
+        parts.push(palette(c.colors, 'palette'));
         break;
-      }
       case 'video':
         texts();
         if (c.video) parts.push(player(c));
@@ -216,20 +255,40 @@
       default:
         texts();
     }
+    if (c.more) parts.push(more(c.more, sec));
     parts.forEach((p, i) => { p.style.setProperty('--i', i); block.append(p); });
     sec.append(el('div', 'slide__scrim'), block);
     return sec;
   }
+  // Текст показывается один раз на приход к остановке (повтор цикла видео его не трогает);
+  // зритель может скрыть его кнопкой или клавишей T — тогда он не появляется и на следующих остановках.
+  let textOn = true, textTimer = 0;
   function showText(id) {
     const c = (C.stops[id] || {}).content;
-    if (!c || !c.layout || c.layout === 'none') return;
+    if (!textOn || shown || !c || !c.layout || c.layout === 'none') return;
     const s = shown = render(c);
     overlay.append(s);
     void s.offsetWidth; // стартовые стили применены — дальше идут transition
     s.classList.add('is-in');
   }
+  // Сначала чистый кадр: текст проявляется через textDelay (~1.5 с) после прихода
+  function showTextLater(id) {
+    clearTimeout(textTimer);
+    const d = C.defaults.textDelay != null ? C.defaults.textDelay : 1.5;
+    textTimer = setTimeout(() => { if (current === id && !nav.busy) showText(id); }, d * 1000);
+  }
+  const textBtn = $('.text-toggle');
+  function setTextOn(on) {
+    textOn = on;
+    textBtn.setAttribute('aria-pressed', !on);
+    textBtn.setAttribute('aria-label', on ? 'Скрыть текст' : 'Показать текст');
+    if (!on) hideText();
+    else if (!nav.busy) showText(current);
+  }
+  textBtn.addEventListener('click', () => setTextOn(!textOn));
   // Текст уходит за textLead (~0.3 с) до начала пролёта
   function hideText() {
+    clearTimeout(textTimer);
     const s = shown;
     shown = null;
     if (!s) return Promise.resolve();
@@ -257,13 +316,14 @@
   addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest?.('video')) return; // клавиши управляют аниматиком
-    if ((e.key === ' ' || e.key === 'Enter') && e.target.closest?.('button')) return; // кнопка сама обработает
+    if ((e.key === ' ' || e.key === 'Enter') && e.target.closest?.('button, summary')) return; // кнопка сама обработает
     if (e.key in keys) { e.preventDefault(); step(e.key === ' ' && e.shiftKey ? -1 : keys[e.key]); }
     else if (e.key === 'Home') { e.preventDefault(); goTo(tour[0]); }
     else if (e.key === 'End') { e.preventDefault(); goTo(tour[tour.length - 1]); }
     else if (e.key === 'Enter' && current === COVER) step(1);
     else if (e.code === 'KeyF') toggleFullscreen();
     else if (e.code === 'KeyM') music.toggle();
+    else if (e.code === 'KeyT') setTextOn(!textOn);
   });
 
   function toggleFullscreen() {
@@ -323,7 +383,7 @@
     }
     loader.classList.add('is-done');
     await sleep(0.25);
-    showText(current);
+    showTextLater(current);
   })();
 
   window.App = { goTo, jump, step, nav, music, get current() { return current; } };

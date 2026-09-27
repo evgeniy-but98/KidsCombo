@@ -143,13 +143,30 @@
     } else {
       const s = M.stops[id] || {};
       const el = div('layer stop' + (s.loop ? '' : s.still ? ' stop--still' : ' stop--empty'));
+      // Узкий экран: кадр целиком, свободное место — заполнение (CONFIG.stops.<id>.mobileFrame, см. style.css)
+      const mf = (C.stops[id] || {}).mobileFrame;
+      let cv = null;
+      if (mf && mf.fit === 'contain') {
+        el.dataset.fit = 'contain';
+        el.dataset.fill = mf.fill || 'ambient';
+        if (mf.frame) el.dataset.frame = mf.frame;
+        const f = div('stop__fill');
+        if (mf.tint) f.style.setProperty('--tint', mf.tint);
+        if (el.dataset.fill === 'ambient') {
+          if (s.poster) f.style.backgroundImage = `url("${s.poster}")`;
+          cv = document.createElement('canvas');
+          cv.width = 64; cv.height = 36;
+          f.append(cv);
+        }
+        el.append(f);
+      }
       const bg = div('stop__bg');
       if (s.poster) bg.style.backgroundImage = `url("${s.poster}")`;
       el.append(bg);
       const videos = [];
       if (s.loop) for (let i = 0; i < (D.loopMode === 'pingpong' ? 2 : 1); i++) { const v = video(s.loop); el.append(v); videos.push(v); }
       if (!s.loop && !s.still) { el.append(div('stop__todo', 'кадр в работе')); el.lastChild.append(div('stop__id', id)); }
-      L = { k, kind: 'stop', id, el, videos, bg, fps: s.fps || 24 };
+      L = { k, kind: 'stop', id, el, videos, bg, fps: s.fps || 24, cv, cx: cv && cv.getContext('2d') };
     }
     L.el.dataset.layer = k;
     stage.insertBefore(L.el, fx);
@@ -157,6 +174,16 @@
     return L;
   }
   const stopLayer = id => layer('stop:' + id);
+  // «Живое размытие» вокруг кадра: раз в 120 мс крошечная копия текущего кадра в canvas, размывает её CSS
+  const narrow = matchMedia('(max-width: 700px), (max-height: 500px), (max-aspect-ratio: 4/3)');
+  setInterval(() => {
+    if (!narrow.matches) return;
+    for (const L of layers.values()) {
+      if (!L.cx || L.el.style.opacity === '0') continue;
+      const v = L.videos.find(x => !x.paused) || L.videos[0];
+      if (v && v.readyState >= 2) L.cx.drawImage(v, 0, 0, L.cv.width, L.cv.height);
+    }
+  }, 120);
   function dispose(L) {
     for (const v of L.videos) { v._want = false; v.pause(); v.removeAttribute('src'); v.load(); }
     L.el.remove();

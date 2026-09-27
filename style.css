@@ -41,6 +41,19 @@ button { font: inherit; color: inherit; touch-action: manipulation; user-select:
 video.layer, .stop video { display: block; object-fit: cover; }
 .stop video, .stop__bg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .stop__bg { background: center / cover no-repeat; }
+/* заполнение вокруг кадра целиком (mobileFrame, только узкие экраны — см. конец файла) */
+.stop__fill { display: none; position: absolute; inset: 0; overflow: hidden; background: var(--ink) center / cover no-repeat; }
+.stop__fill canvas {
+  position: absolute; left: 50%; top: 50%; translate: -50% -50%;
+  width: max(100vw, 177.78vh); height: max(100vh, 56.25vw);
+  width: max(100vw, 177.78dvh); height: max(100dvh, 56.25vw);
+}
+/* ambient — живое размытое продолжение кадра; glow — тёмная дымка в цвете сцены (--tint: "r g b") */
+.stop[data-fill="ambient"] .stop__fill { filter: blur(22px) saturate(1.25) brightness(.55); transform: scale(1.15); }
+.stop[data-fill="glow"] .stop__fill {
+  background: radial-gradient(95% 50% at 50% 50%, rgb(var(--tint, 150 90 60) / .5) 0%, rgb(var(--tint, 150 90 60) / .16) 48%, transparent 78%),
+              radial-gradient(130% 90% at 50% 50%, #2b1d16 0%, var(--ink) 72%);
+}
 /* остановка без файлов: нейтральный тёмный фон, пометка в углу (центр кадра — под текст слайда) */
 .stop--empty { background: radial-gradient(120% 90% at 50% 40%, #2b1d16 0%, var(--ink) 70%); }
 .stop__todo { position: absolute; top: var(--inset-top); left: var(--inset-left); display: flex; gap: .6em; align-items: baseline; font: 500 13px/44px var(--font-text); color: var(--cream-dim); opacity: .7; }
@@ -52,23 +65,29 @@ video.layer, .stop video { display: block; object-fit: cover; }
 }
 
 /* круглые полупрозрачные кнопки над видео: подложка ради читаемости на подвижном фоне */
-.nav__btn, .mute {
+.nav__btn, .mute, .text-toggle {
   width: 44px; height: 44px; padding: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
   border: 1px solid rgba(255, 244, 226, .28);
   background: rgba(26, 15, 10, .38);
   -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%);
   transition: transform 160ms var(--ease-out), background-color 200ms ease;
 }
-.nav__btn:active, .mute:active { transform: scale(.94); }
-.nav__btn svg, .mute svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nav__btn:active, .mute:active, .text-toggle:active { transform: scale(.94); }
+.nav__btn svg, .mute svg, .text-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 @media (hover: hover) and (pointer: fine) {
-  .nav__btn:hover, .mute:hover { background: rgba(26, 15, 10, .62); }
+  .nav__btn:hover, .mute:hover, .text-toggle:hover { background: rgba(26, 15, 10, .62); }
 }
 
 .mute { position: fixed; top: var(--inset-top); right: var(--inset-right); z-index: 10; }
 .mute[hidden] { display: none; }
 .mute__off, .mute[aria-pressed="true"] .mute__on { display: none; }
 .mute[aria-pressed="true"] .mute__off { display: block; }
+/* скрыть/вернуть текст слайда (клавиша T): рядом с кнопкой звука, на обложке не нужна */
+.text-toggle { position: fixed; top: var(--inset-top); right: var(--inset-right); z-index: 10; transition: transform 160ms var(--ease-out), background-color 200ms ease, opacity 200ms var(--ease-out), visibility 0s; }
+.mute:not([hidden]) ~ .text-toggle { right: calc(var(--inset-right) + 54px); }
+.text-toggle__off, .text-toggle[aria-pressed="true"] .text-toggle__on { display: none; }
+.text-toggle[aria-pressed="true"] .text-toggle__off { display: block; }
+body.on-cover .text-toggle { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 200ms var(--ease-out), visibility 0s 200ms; }
 
 /* обложка: кнопка «Открыть» — тёплый свет из щели между дверями */
 .open {
@@ -208,7 +227,52 @@ body:not(.on-cover) .open, .is-moving .open {
 .palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 16px 12px; width: 100%; margin: 1.1em 0 0; padding: 0; list-style: none; }
 .swatch__chip { display: block; aspect-ratio: 4 / 3; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(26, 15, 10, .1); }
 .swatch__name { display: block; margin-top: .55em; font-size: 14px; font-weight: 500; line-height: 1.3; }
-.swatch__hex { font-size: 13px; line-height: 1.3; font-variant-numeric: tabular-nums; letter-spacing: .02em; opacity: .65; }
+
+/* ---------- плашка в заданном месте кадра (content.box) ----------
+   Координаты — доли видеокадра 16:9 после object-fit: cover: --fw/--fh — его размер на экране,
+   --fx/--fy — сдвиг (отрицательный там, где кадр обрезан). Плашка остаётся на том же месте картинки при любом окне. */
+#overlay { --vh: 1vh; }
+@supports (height: 1dvh) { #overlay { --vh: 1dvh; } }
+#overlay {
+  --fw: max(100vw, var(--vh) * 177.78); --fh: max(var(--vh) * 100, 56.25vw);
+  --fx: calc((100vw - var(--fw)) / 2); --fy: calc((var(--vh) * 100 - var(--fh)) / 2);
+}
+.slide[data-box] { display: block; padding: 0; }
+.slide[data-box] > .slide__block {
+  position: absolute; max-width: calc(100vw - var(--inset-left) - var(--inset-right));
+  left: max(var(--inset-left), calc(var(--fx) + var(--fw) * var(--bx) / 100));
+  width: clamp(17rem, calc(var(--fw) * var(--bw) / 100), 40rem);
+}
+.slide[data-box="top"] > .slide__block { top: max(var(--inset-top), calc(var(--fy) + var(--fh) * var(--by) / 100)); }
+.slide[data-box="bottom"] > .slide__block { bottom: calc(var(--inset-bottom) + 84px); }
+.slide[data-scrim="off"] > .slide__scrim { display: none; }
+
+/* компактная плашка: то же «морозное стекло», меньше отступы и кегль — чтобы уместиться в свободном углу кадра */
+.slide[data-size="compact"] .slide__block { padding: clamp(16px, 1.5vw, 26px) clamp(18px, 1.7vw, 30px); }
+.slide[data-size="compact"] .slide__kicker { font-size: clamp(15px, 1.05vw, 19px); margin-bottom: .3em; }
+.slide[data-size="compact"] .slide__title { font-size: clamp(24px, min(2.4vw, 4.3vh), 44px); margin-bottom: .3em; }
+.slide[data-size="compact"] .slide__text { max-width: none; font-size: clamp(15px, min(1vw, 1.8vh), 17.5px); line-height: 1.5; }
+
+/* «Читать» — только у свёрнутой плашки на узких экранах (см. ниже) */
+.slide__open { display: none; }
+
+/* раскрываемый блок под текстом плашки (палитра «Свет и цвет») */
+.slide__more { width: 100%; margin-top: .9em; padding-top: .7em; border-top: 1px solid rgba(255, 244, 226, .14); }
+.slide__more > summary {
+  display: inline-flex; align-items: center; gap: .5em; cursor: pointer; list-style: none;
+  font: 600 14px/1.4 var(--font-text); letter-spacing: .02em; color: var(--cream-dim); transition: color 200ms ease;
+}
+.slide__more > summary::-webkit-details-marker { display: none; }
+.slide__more > summary::before {
+  content: ""; width: 6px; height: 6px; margin: 0 2px 2px 1px; border: solid currentColor; border-width: 0 1.6px 1.6px 0;
+  rotate: -45deg; transition: rotate 200ms var(--ease-out);
+}
+.slide__more[open] > summary::before { rotate: 45deg; margin-bottom: 4px; }
+@media (hover: hover) and (pointer: fine) { .slide__more > summary:hover { color: var(--cream); } }
+.slide__more .palette { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-top: .75em; }
+.slide__more .swatch { display: grid; grid-template-columns: 24px 1fr; column-gap: 10px; align-items: center; }
+.slide__more .swatch__chip { aspect-ratio: 1; border-radius: 7px; box-shadow: inset 0 0 0 1px rgba(255, 244, 226, .2); }
+.slide__more .swatch__name { margin: 0; font-size: 13px; }
 
 /* видео-шаблон: аниматик/референс, только по кнопке */
 .player { position: relative; width: min(100%, calc((100dvh - 360px) * 16 / 9)); align-self: center; aspect-ratio: 16 / 9; margin-top: .9em; border-radius: 10px; overflow: hidden; background: #000; }
@@ -258,6 +322,95 @@ body:not(.on-cover) .open, .is-moving .open {
 @media (max-height: 560px) {
   .slide__title, .slide[data-layout="title"] .slide__title { font-size: clamp(26px, 4vw, 40px); }
   .slide__quote { font-size: clamp(24px, 3.4vw, 40px); }
+}
+
+/* ---------- телефон, узкие, почти квадратные и сверхширокие окна: кадр обрезан, под плашку нет места ----------
+   Плашка с box сворачивается до заголовка в углу (вверху слева; mobile: "bottom" — внизу над навигацией),
+   текст раскрывается кнопкой «Читать». Затемнение — только узкая полоса у нижнего края. */
+@media (max-width: 700px), (max-height: 500px), (max-aspect-ratio: 4/3), (min-aspect-ratio: 21/10) {
+  #overlay .slide[data-box] > .slide__block {
+    left: var(--inset-left); width: auto; padding: 10px 14px 11px;
+    max-width: min(24rem, calc(100vw - var(--inset-left) - var(--inset-right) - 108px), max(11rem, calc(var(--fw) * var(--bw) / 100)));
+  }
+  #overlay .slide[data-box][data-mobile="top"] > .slide__block { top: var(--inset-top); bottom: auto; }
+  #overlay .slide[data-box][data-mobile="box"] > .slide__block { top: max(var(--inset-top), calc(var(--fy) + var(--fh) * var(--by) / 100)); bottom: auto; }
+  #overlay .slide[data-box][data-mobile="bottom"] > .slide__block {
+    top: auto; bottom: calc(var(--inset-bottom) + 60px);
+    max-width: min(calc(100vw - var(--inset-left) - var(--inset-right)), max(11rem, calc(var(--fw) * var(--bw) / 100)));
+  }
+  #overlay .slide[data-box] > .slide__scrim { background: linear-gradient(0deg, rgba(var(--s), .8) 0%, rgba(var(--s), .42) 14%, rgba(var(--s), 0) 28%) !important; }
+  #overlay .slide[data-box] :is(.slide__kicker, .slide__text, .slide__lead) { display: none; }
+  #overlay .slide[data-box].is-open :is(.slide__text, .slide__lead) { display: block; }
+  /* «Свет и цвет» — отдельная раскрываемая область под заголовком, не часть текста (фон плотнее:
+     размытие фона внутри плашки со своим backdrop-filter не работает) */
+  #overlay .slide[data-box] .slide__more {
+    position: absolute; top: calc(100% + 8px); left: 0; width: max-content; margin: 0; padding: 8px 14px 9px;
+    max-width: calc(100vw - var(--inset-left) - var(--inset-right));
+    border: 1px solid rgba(255, 244, 226, .12); border-radius: 12px; background: rgba(26, 15, 10, .62);
+  }
+  #overlay .slide[data-box] .slide__more[open] { padding-bottom: 12px; }
+  #overlay .slide[data-box] .slide__more .palette { gap: 8px 18px; margin-top: .6em; }
+  #overlay .slide[data-box] .slide__more .swatch { grid-template-columns: 18px 1fr; column-gap: 8px; }
+  #overlay .slide[data-box] .slide__more .swatch__chip { border-radius: 5px; }
+  #overlay .slide[data-box] .slide__more .swatch__name { font-size: 12px; }
+  #overlay .slide[data-box] .slide__title { font-size: 20px; line-height: 1.12; margin: 0; }
+  #overlay .slide[data-box][data-layout="title"] .slide__title { font-size: 28px; }
+  #overlay .slide[data-box].is-open .slide__title { margin-bottom: .35em; }
+  #overlay .slide[data-box] :is(.slide__text, .slide__lead) { font-size: 15px; line-height: 1.5; }
+  .slide__open {
+    display: inline-flex; margin-top: 3px; padding: 4px 0; border: 0; background: none; cursor: pointer;
+    font: 600 13px/1.3 var(--font-text); letter-spacing: .02em; color: rgb(var(--glow));
+  }
+  /* свёрнута: вся плашка — кнопка «Читать», от неё виден только заголовок со стрелкой */
+  #overlay .slide[data-box]:not(.is-open) .slide__open { position: absolute; inset: 0; margin: 0; padding: 0; font-size: 0; }
+  #overlay .slide[data-box]:not(.is-open) .slide__title::after { content: "\00a0\203A"; font-family: var(--font-text); font-weight: 600; color: rgb(var(--glow)); }
+  #overlay .slide[data-box].is-open .slide__open { order: 99; margin-top: .6em; }
+}
+
+/* ---------- телефон, планшет, окна 4:3 и уже: кадр целиком там, где у остановки есть mobileFrame ----------
+   Видео не растягивается и не обрезается: элемент получает размер кадра 16:9 и стоит по центру,
+   вокруг — заполнение (.stop__fill). Свёрнутый заголовок и навигация остаются в свободных полосах. */
+@media (max-width: 700px), (max-height: 500px), (max-aspect-ratio: 4/3) {
+  .stop[data-fit="contain"] .stop__fill { display: block; }
+  .stop[data-fit="contain"] :is(video, .stop__bg) {
+    inset: 0; margin: auto;
+    width: min(100vw, 177.78vh); height: min(56.25vw, 100vh);
+    width: min(100vw, 177.78dvh); height: min(56.25vw, 100dvh);
+  }
+  /* card — кадр-карточка со скруглением, как у плашек */
+  .stop[data-frame="card"] :is(video, .stop__bg) {
+    width: min(100vw - 28px, (100vh - 28px) * 1.7778); height: min(56.25vw - 15.75px, 100vh - 28px);
+    width: min(100vw - 28px, (100dvh - 28px) * 1.7778); height: min(56.25vw - 15.75px, 100dvh - 28px);
+    border-radius: 16px; box-shadow: 0 30px 70px -24px rgba(0, 0, 0, .75), 0 0 0 1px rgba(255, 244, 226, .12);
+  }
+  /* у такой остановки координаты box считаются не по обрезанному кадру — заголовок просто вверху слева */
+  body[data-fit="contain"] #overlay .slide[data-box] > .slide__block { top: var(--inset-top); bottom: auto; }
+}
+/* телефон горизонтально: кадр упирается в высоту — оставляем снизу полосу под навигацию, кадр прижат вверх;
+   заголовок с mobile: "box" встаёт в свою точку этого кадра (у scene09 — под логотипами) */
+@media (max-height: 500px) and (min-aspect-ratio: 16/9) {
+  .stop[data-fit="contain"] :is(video, .stop__bg) {
+    inset: 0 0 calc(var(--inset-bottom) + 56px) 0;
+    width: calc((100vh - var(--inset-bottom) - 56px) * 1.7778); height: calc(100vh - var(--inset-bottom) - 56px);
+    width: calc((100dvh - var(--inset-bottom) - 56px) * 1.7778); height: calc(100dvh - var(--inset-bottom) - 56px);
+  }
+  body[data-fit="contain"] #overlay {
+    --fh: calc(var(--vh) * 100 - var(--inset-bottom) - 56px); --fw: calc(var(--fh) * 1.7778);
+    --fx: calc((100vw - var(--fw)) / 2); --fy: 0px;
+  }
+  body[data-fit="contain"] #overlay .slide[data-box][data-mobile="box"] > .slide__block {
+    top: max(var(--inset-top), calc(var(--fy) + var(--fh) * var(--by) / 100));
+    left: max(var(--inset-left), calc(var(--fx) + var(--fw) * var(--bx) / 100));
+  }
+  /* карточка: отступ сверху, как по краям в вертикальном положении, — не упирается в край экрана */
+  .stop[data-frame="card"] :is(video, .stop__bg) {
+    inset: 14px 0 calc(var(--inset-bottom) + 56px) 0;
+    width: calc((100vh - var(--inset-bottom) - 70px) * 1.7778); height: calc(100vh - var(--inset-bottom) - 70px);
+    width: calc((100dvh - var(--inset-bottom) - 70px) * 1.7778); height: calc(100dvh - var(--inset-bottom) - 70px);
+  }
+  body[data-fit="contain"][data-frame="card"] #overlay { --fh: calc(var(--vh) * 100 - var(--inset-bottom) - 70px); --fy: 14px; }
+  /* кадр невысокий: заголовок в одну строку, чтобы уместиться в свободную полосу над объектами */
+  body[data-fit="contain"] #overlay .slide[data-box] > .slide__block { max-width: min(24rem, calc(100vw - var(--inset-left) - var(--inset-right) - 108px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
