@@ -13,6 +13,7 @@
   // hops — готовый путь (отладка: проиграть конкретный сегмент); без него путь ищет плеер
   async function goTo(id, hops) {
     if (!id || (id === current && !hops) || nav.busy) return;
+    viewer.close();
     nav.busy = true;
     document.body.classList.add('is-moving');
     nav.dir = Math.sign(idx(id) - idx(current));
@@ -50,15 +51,19 @@
   // ---------- UI ----------
   const prev = $('.nav__prev'), next = $('.nav__next'), dots = $('.nav__dots'), count = $('.nav__count');
   const pad = n => String(n).padStart(2, '0');
-  // История ролика (до логотипа) и режиссёрские решения после неё считаются отдельно
+  // История ролика (до логотипа) и режиссёрские решения после неё считаются отдельно;
+  // завершение тритмента («Спасибо!») — вне обоих счётчиков и без своей точки
   const isSection = id => !!(C.stops[id] || {}).section;
-  const story = tour.filter(id => !isSection(id)), decisions = tour.filter(isSection);
-  tour.forEach((id, i) => {
+  const isFinale = id => !!(C.stops[id] || {}).finale;
+  const story = tour.filter(id => !isSection(id) && !isFinale(id)), decisions = tour.filter(isSection);
+  tour.forEach(id => {
+    if (isFinale(id)) return;
     const c = (C.stops[id] || {}).content || {}, name = c.title || c.label || c.kicker || id;
     const li = document.createElement('li');
     if (isSection(id)) li.className = 'nav__item--section'; // разделы тритмента после истории
     const b = document.createElement('button');
     b.className = 'nav__dot';
+    b.dataset.id = id;
     b.setAttribute('aria-label', isSection(id) ? `Решение ${decisions.indexOf(id) + 1} — ${name}` : `${pad(story.indexOf(id) + 1)} — ${name}`);
     b.title = name;
     b.addEventListener('click', () => goTo(id));
@@ -69,14 +74,14 @@
     const i = idx(current);
     prev.hidden = i <= 0;
     next.hidden = i >= tour.length - 1;
-    count.textContent = isSection(current)
-      ? `Решения ${decisions.indexOf(current) + 1}/${decisions.length}`
+    count.textContent = isFinale(current) ? ''
+      : isSection(current) ? `Решения ${decisions.indexOf(current) + 1}/${decisions.length}`
       : `${pad(story.indexOf(current) + 1)} / ${pad(story.length)}`;
     // конец истории (логотип): «Вперёд» с подписью ведёт к разбору, сам кадр остаётся чистым
     const bridge = !isSection(current) && isSection(tour[i + 1]);
     next.classList.toggle('nav__next--bridge', bridge);
     next.setAttribute('aria-label', bridge ? 'Режиссёрские решения' : 'Вперёд');
-    dots.querySelectorAll('.nav__dot').forEach((b, j) => b.toggleAttribute('aria-current', j === i));
+    dots.querySelectorAll('.nav__dot').forEach(b => b.toggleAttribute('aria-current', b.dataset.id === current));
     document.body.dataset.slide = current;
     const mf = (C.stops[current] || {}).mobileFrame || {}; // кадр целиком на узком экране
     document.body.dataset.fit = mf.fit || '';
@@ -213,6 +218,157 @@
     b.addEventListener('click', () => setOpen(sec, !sec.classList.contains('is-open')));
     return b;
   }
+
+  // ---------- мудборд крупно: просмотр поверх сайта ----------
+  // Мудборд вписан в экран; нажатие (или + и −) — увеличение: дальше прокрутка, мышью — перетаскивание.
+  // «Оригинал» — исходный файл в новой вкладке (на телефоне там работает обычное увеличение пальцами).
+  // Esc — закрыть, ← → — другой мудборд. Пока просмотр открыт, клавиши, колесо и свайпы сайт не листают.
+  const svgIcon = d => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+  const viewer = (() => {
+    let root, stage, img, title, note, hint, orig, count, prevB, nextB, closeB;
+    let items = [], at = 0, from = null, opened = false, zoomed = false, drag = null, moved = false, token = 0;
+    const coarse = matchMedia('(pointer: coarse)');
+    const hints = () => zoomed ? (coarse.matches ? 'Коснитесь ещё раз, чтобы вписать в экран' : 'Перетащите, чтобы рассмотреть; нажмите ещё раз — вписать в экран')
+      : (coarse.matches ? 'Коснитесь, чтобы увеличить' : 'Нажмите, чтобы увеличить');
+    function button(cls, label, d) {
+      const b = el('button', 'nav__btn ' + cls);
+      b.type = 'button';
+      b.setAttribute('aria-label', label);
+      b.innerHTML = svgIcon(d);
+      return b;
+    }
+    function build() {
+      root = el('div', 'viewer');
+      root.hidden = true;
+      root.setAttribute('role', 'dialog');
+      root.setAttribute('aria-modal', 'true');
+      const bar = el('div', 'viewer__bar'), head = el('div', 'viewer__head'), foot = el('div', 'viewer__foot');
+      title = el('h2', 'viewer__title'); note = el('p', 'viewer__note'); hint = el('p', 'viewer__hint');
+      head.append(title, note, hint);
+      orig = el('a', 'viewer__orig', 'Оригинал');
+      orig.target = '_blank'; orig.rel = 'noopener';
+      closeB = button('viewer__close', 'Закрыть', 'M6 6l12 12M18 6L6 18');
+      bar.append(head, orig, closeB);
+      stage = el('div', 'viewer__stage');
+      stage.tabIndex = -1; // нажатие на кадр оставляет фокус внутри просмотра
+      img = el('img', 'viewer__img');
+      img.alt = ''; img.draggable = false;
+      stage.append(img);
+      prevB = button('viewer__prev', 'Предыдущий мудборд', 'M15 5l-7 7 7 7');
+      nextB = button('viewer__next', 'Следующий мудборд', 'M9 5l7 7-7 7');
+      count = el('span', 'viewer__count');
+      foot.append(prevB, count, nextB);
+      root.append(bar, stage, foot);
+      document.body.append(root);
+      closeB.addEventListener('click', close);
+      prevB.addEventListener('click', () => show(at - 1));
+      nextB.addEventListener('click', () => show(at + 1));
+      stage.addEventListener('click', e => { if (moved) { moved = false; return; } zoom(!zoomed, e); });
+      // мышью увеличенный мудборд перетаскивается; на тач-экране он двигается обычной прокруткой
+      stage.addEventListener('pointerdown', e => {
+        if (!zoomed || e.pointerType !== 'mouse' || e.button) return;
+        drag = { x: e.clientX, y: e.clientY, l: stage.scrollLeft, t: stage.scrollTop };
+        moved = false;
+        stage.setPointerCapture(e.pointerId);
+      });
+      stage.addEventListener('pointermove', e => {
+        if (!drag) return;
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; root.classList.add('is-dragging'); }
+        stage.scrollLeft = drag.l - dx;
+        stage.scrollTop = drag.t - dy;
+      });
+      const stop = () => { drag = null; root.classList.remove('is-dragging'); };
+      stage.addEventListener('pointerup', stop);
+      stage.addEventListener('pointercancel', stop);
+      addEventListener('resize', () => { if (opened && !zoomed) img.style.width = fitW() + 'px'; });
+    }
+    function fitW() { // ширина мудборда, вписанного в область просмотра (без полос прокрутки от увеличенного кадра)
+      if (!zoomed) img.style.width = '0px';
+      const m = items[at], cs = getComputedStyle(stage);
+      const w = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const h = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      return Math.max(1, Math.min(w, h * m.w / m.h));
+    }
+    // увеличение: не меньше исходного размера и вдвое крупнее вписанного; точка под курсором остаётся на месте
+    function zoom(on, e) {
+      if (on === zoomed) return;
+      const m = items[at], r = img.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+      const pt = e && e.clientX != null;
+      const px = pt ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0.5;
+      const py = pt ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 0.5;
+      const ax = pt ? e.clientX - sr.left : sr.width / 2, ay = pt ? e.clientY - sr.top : sr.height / 2;
+      const w = on ? Math.max(m.w, fitW() * 2) : 0;
+      zoomed = on;
+      root.classList.toggle('is-zoomed', on);
+      hint.textContent = hints();
+      img.style.width = (on ? w : fitW()) + 'px';
+      if (on) { stage.scrollLeft = px * w - ax; stage.scrollTop = py * w * m.h / m.w - ay; }
+    }
+    function show(i) {
+      at = (i + items.length) % items.length;
+      const m = items[at], t = ++token;
+      title.textContent = m.title;
+      orig.href = m.original || m.src;
+      orig.setAttribute('aria-label', `${m.title}: исходный файл в новой вкладке`);
+      count.textContent = `${at + 1} / ${items.length}`;
+      root.classList.toggle('is-single', items.length < 2);
+      zoomed = false;
+      root.classList.remove('is-zoomed');
+      hint.textContent = hints(); // все подписи — до расчёта места под кадр
+      img.alt = `${m.title} — мудборд`;
+      img.style.aspectRatio = `${m.w} / ${m.h}`;
+      img.style.width = fitW() + 'px';
+      stage.scrollLeft = stage.scrollTop = 0;
+      // сразу уменьшенная копия (уже загружена превью), полная — как только придёт
+      img.src = m.preview || m.src;
+      if (m.preview && m.preview !== m.src) { const full = new Image(); full.onload = () => { if (t === token) img.src = m.src; }; full.src = m.src; }
+    }
+    function open(list, i, text, back) {
+      if (!root) build();
+      items = list; from = back; opened = true;
+      note.textContent = text || '';
+      root.hidden = false;
+      show(i);
+      document.body.classList.add('has-viewer');
+      requestAnimationFrame(() => root.classList.add('is-in'));
+      closeB.focus();
+    }
+    function close() {
+      if (!opened) return;
+      opened = false; token++;
+      root.classList.remove('is-in');
+      root.hidden = true;
+      document.body.classList.remove('has-viewer');
+      if (from && from.isConnected) from.focus({ preventScroll: true });
+    }
+    function key(e) {
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft') show(at - 1);
+      else if (e.key === 'ArrowRight') show(at + 1);
+      else if (e.key === '+' || e.key === '=') zoom(true);
+      else if (e.key === '-' || e.key === '0') zoom(false);
+      else if (e.key === 'Tab') { // фокус остаётся внутри просмотра
+        const f = [...root.querySelectorAll('a[href], button')].filter(b => b.offsetParent);
+        const k = f.indexOf(document.activeElement);
+        f[(k + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+      } else return;
+      e.preventDefault();
+    }
+    return { open, close, key, get isOpen() { return opened; } };
+  })();
+  // Превью мудборда в разделе: кадр, название и «открыть»; по нажатию — крупный просмотр
+  function mood(items, i, text) {
+    const m = items[i], b = el('button', 'mood'), f = el('span', 'mood__frame'), im = el('img'), z = el('span', 'mood__zoom');
+    b.type = 'button';
+    b.setAttribute('aria-label', `${m.title}: открыть мудборд крупно`);
+    im.alt = ''; im.decoding = 'async'; im.src = m.preview || m.src;
+    z.innerHTML = svgIcon('M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.2 15.2L20 20M10.5 7.5v6M7.5 10.5h6');
+    f.append(im, z);
+    b.append(f, el('span', 'mood__title', m.title), el('span', 'mood__hint', 'Мудборд · открыть'));
+    b.addEventListener('click', () => viewer.open(items, i, text, b));
+    return b;
+  }
   function render(c) {
     const sec = el('section', 'slide'), block = el('div', 'slide__block'), parts = [];
     sec.dataset.layout = c.layout;
@@ -248,6 +404,12 @@
         break;
       case 'gallery': {
         texts();
+        if (c.moodboards) { // мудборды по бокам вводного текста: слева комната, справа ночь (в узком окне — рядом под текстом)
+          const ms = list(c.moodboards), row = el('div', 'moods'), head = el('div', 'moods__head');
+          head.append(...parts.splice(0));
+          row.append(head, ...ms.map((m, i) => mood(ms, i, c.moodNote)));
+          parts.push(row);
+        }
         const imgs = list(c.images).slice(0, 6), g = el('ul', 'gallery');
         const cols = c.cols || (imgs.length <= 3 ? imgs.length : imgs.length === 4 ? 2 : 3);
         g.style.setProperty('--cols', cols);
@@ -295,12 +457,15 @@
         if (c.video) parts.push(player(c));
         if (c.caption) parts.push(el('p', 'media__caption', c.caption));
         break;
+      case 'finale': // завершение: одно слово по центру, подпись — внизу экрана, вне блока
+        break;
       default:
         texts();
     }
     if (c.more) parts.push(more(c.more, sec));
     parts.forEach((p, i) => { p.style.setProperty('--i', i); block.append(p); });
     sec.append(el('div', 'slide__scrim'), block);
+    if (c.layout === 'finale' && c.caption) sec.append(el('p', 'slide__credit', c.caption));
     return sec;
   }
   // Текст показывается один раз на приход к остановке (повтор цикла видео его не трогает);
@@ -351,6 +516,7 @@
   const canScroll = (b, dy) => (dy > 0 ? b.scrollTop + b.clientHeight < b.scrollHeight - 1 : dy < 0 && b.scrollTop > 0);
   let acc = 0, lastWheel = 0, used = false;
   addEventListener('wheel', e => {
+    if (viewer.isOpen) return; // в просмотре мудборда колесо двигает увеличенный кадр
     const b = scroller(e.target);
     if (b && Math.abs(e.deltaY) >= Math.abs(e.deltaX) && canScroll(b, e.deltaY)) { lastWheel = performance.now(); used = true; return; }
     e.preventDefault();
@@ -366,6 +532,7 @@
 
   const keys = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, ' ': 1, ArrowLeft: -1, ArrowUp: -1, PageUp: -1 };
   addEventListener('keydown', e => {
+    if (viewer.isOpen) return viewer.key(e); // открыт мудборд: свои клавиши, сайт не листается
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest?.('video')) return; // клавиши управляют аниматиком
     if ((e.key === ' ' || e.key === 'Enter') && e.target.closest?.('button, summary')) return; // кнопка сама обработает
@@ -386,7 +553,7 @@
 
   // Свайпы: вверх/влево — вперёд, вниз/вправо — назад. Прокрутку и pull-to-refresh глушит CSS (overscroll-behavior).
   let t0 = null;
-  addEventListener('touchstart', e => { const t = e.touches[0], b = scroller(e.target); t0 = { x: t.clientX, y: t.clientY, at: performance.now(), b, top: b ? b.scrollTop : 0 }; }, { passive: true });
+  addEventListener('touchstart', e => { if (viewer.isOpen) { t0 = null; return; } const t = e.touches[0], b = scroller(e.target); t0 = { x: t.clientX, y: t.clientY, at: performance.now(), b, top: b ? b.scrollTop : 0 }; }, { passive: true });
   addEventListener('touchend', e => {
     if (!t0) return;
     const t = e.changedTouches[0], dx = t.clientX - t0.x, dy = t.clientY - t0.y;

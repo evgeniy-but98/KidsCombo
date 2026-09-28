@@ -3,8 +3,8 @@
 window.CONFIG = {
   // Порядок слайдов: кнопки вперёд/назад, точки прогресса, location.hash.
   // id без файлов в манифесте показывается заглушкой «кадр в работе».
-  // После scene10 (логотип) — разделы тритмента о режиссёрском решении, в 20 секунд ролика не входят.
-  tour: ["intro", "master", "closeup", "globes", "empty", "scene06", "scene07", "scene08", "scene09", "scene10", "color", "world", "rhythm"],
+  // После scene10 (логотип) — разделы тритмента о режиссёрском решении, в 20 секунд ролика не входят; thanks — завершение.
+  tour: ["intro", "master", "closeup", "globes", "empty", "scene06", "scene07", "scene08", "scene09", "scene10", "color", "world", "rhythm", "thanks"],
 
   defaults: {
     join: "crossfade",   // как пролёт переходит в цикл: cut | crossfade | push
@@ -35,7 +35,7 @@ window.CONFIG = {
 
   music: { volume: 0.5, fadeIn: 2.5, fadeOut: 1.2 },
 
-  // Контент слайдов. layout: none | title | text | text-image | gallery | palette | quote | video | timeline
+  // Контент слайдов. layout: none | title | text | text-image | gallery | palette | quote | video | timeline | finale
   // side: left | right | center | top | bottom — где в кадре свободное место под текст
   // theme: dark (светлый текст на тёмной подложке) | light (наоборот)
   // box: { x, y, w, max } — место плашки в процентах видеокадра (левый верхний угол и ширина; max — предел ширины в rem),
@@ -44,7 +44,11 @@ window.CONFIG = {
   // size: "compact" — плашка меньше | "strip" — компактная полоса: заголовок слева, текст справа
   // scrim: false — без затемнения кадра; more: { title, colors } — раскрываемая палитра
   //   (на экране — только образцы и названия, HEX остаются здесь как данные)
-  // gallery: cols — число колонок, flow: true — стрелки между кадрами (последовательность), wide: true — шире плашка
+  // gallery: cols — число колонок, flow: true — стрелки между кадрами (последовательность), wide: true — шире плашка;
+  //   moodboards: [{ title, src, preview, original, w, h }] — превью по бокам вводного текста, по нажатию — крупный просмотр
+  //   (src — веб-версия для просмотра, preview — уменьшенная, original — исходный файл по кнопке «Оригинал», w×h — его размер);
+  //   moodNote — подпись к мудбордам в просмотре
+  // finale: одно главное слово (title) по центру, caption — небольшая подпись внизу
   // timeline: [{ t, label, poster, zoom, background }] — хронометраж (ширина отрезка пропорциональна t;
   //   zoom — ширина кадра в долях отрезка вместо cover, background — цвет полей); notes: [{ term, text }]; caption — строка или список
   // textDelay — своя пауза перед текстом (с), по умолчанию defaults.textDelay
@@ -53,6 +57,7 @@ window.CONFIG = {
   // stops.<id>.frame — кадр целиком на любом экране: { fit: "contain", background } (логотип 2:1, поля цветом фона ролика)
   // stops.<id>.backdrop — фон раздела без своего видео: кадр тритмента, размытый и затемнённый
   // stops.<id>.section — раздел тритмента после истории (другая точка в навигации)
+  // stops.<id>.finale — завершение тритмента: без точки в навигации и вне счётчиков, «Вперёд» скрыта
   // Отсутствующие поля не рендерятся. Картинка без src — серый плейсхолдер.
   stops: {
     intro: {
@@ -63,9 +68,9 @@ window.CONFIG = {
     master: {
       content: {
         layout: "title", side: "bottom", theme: "dark",
-        box: { x: 6, w: 33 }, mobile: "bottom", // левее Комбика и шаров (они с 43% ширины кадра)
-        title: "Войдём в историю",
-        text: "Спасибо за подробный бриф. Предлагаем пройти вслед за камерой: от тихой комнаты Комбика к неожиданному адресату последнего подарка.",
+        box: { x: 6, w: 31 }, mobile: "bottom", // левее Комбика и шаров (они с 43% ширины кадра; в окнах 16:10 и уже кадр обрезан слева)
+        title: "Входим в историю",
+        text: "Спасибо за ясный и подробный бриф. Предлагаем пройти будущий ролик вместе с камерой: заглянуть в комнату Комбика, приблизиться к подаркам и вслед за одним из шаров оказаться в волшебной зимней ночи.",
       },
     },
 
@@ -187,6 +192,12 @@ window.CONFIG = {
           "В комнате камера живо ведёт нас от дверей к Комбику, столу и снежным шарам. Затем история переносится в зимнюю ночь к Деду Морозу, а продуктовый финал возвращает нас в знакомую комнату.",
           "Иллюстрации — кадры нашего тритмента.",
         ],
+        // мудборды — визуальные ориентиры нашего предложения (исходники: МУДБОРД_КОМНАТА.png, МУДБОРД_НОЧЬ.png)
+        moodboards: [
+          { title: "Комната Комбика", src: "assets/moodboard/moodboard-room.webp", preview: "assets/moodboard/moodboard-room-preview.webp", original: "assets/moodboard/moodboard-room.png", w: 1672, h: 941 },
+          { title: "Зимняя ночь Деда Мороза", src: "assets/moodboard/moodboard-night.webp", preview: "assets/moodboard/moodboard-night-preview.webp", original: "assets/moodboard/moodboard-night.png", w: 1672, h: 941 },
+        ],
+        moodNote: "Мудборд — визуальные ориентиры нашего предложения",
         images: [
           { src: "assets/poster/stop__master.first.webp", caption: "Камера движется без склеек: из комнаты к столу и дальше вдоль шаров" },
           { src: "assets/poster/stop__closeup.first.webp", caption: "Передний план и герой читаются ясно, фон мягче" },
@@ -217,6 +228,16 @@ window.CONFIG = {
           { term: "Музыка", text: "Мягкая зимняя тема с нарастанием к финалу." },
           { term: "Звуки", text: "Деликатные: дверь, снег, шар." },
         ],
+      },
+    },
+
+    // ---------- завершение тритмента: тёплый размытый кадр комнаты и одно слово ----------
+    thanks: {
+      finale: true, backdrop: "assets/poster/stop__master.first.webp",
+      content: {
+        layout: "finale", side: "center", theme: "dark", textDelay: 0.6,
+        title: "Спасибо!",
+        caption: "PAPATON × RoRe Group",
       },
     },
   },

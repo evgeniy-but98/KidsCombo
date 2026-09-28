@@ -143,7 +143,7 @@
     } else {
       const s = M.stops[id] || {}, cs = C.stops[id] || {};
       const src = s.loop || s.once; // once — играет один раз и держит последний кадр (логотип)
-      const el = div('layer stop' + (src ? '' : s.still ? ' stop--still' : cs.backdrop ? ' stop--backdrop' : ' stop--empty'));
+      const el = div('layer stop' + (src ? '' : s.still ? ' stop--still' : cs.backdrop ? ' stop--backdrop' : ' stop--empty') + (cs.finale ? ' stop--finale' : ''));
       // Кадр целиком на любом экране (CONFIG.stops.<id>.frame): другой формат — логотип 2:1, поля залиты цветом фона ролика
       if (cs.frame && cs.frame.fit === 'contain') {
         el.dataset.fitAll = 'contain';
