@@ -29,9 +29,9 @@ window.MANIFEST = {
                                 "loop":  "assets/video/stop__intro.mp4",
                                 "poster":  "assets/poster/stop__intro.first.webp",
                                 "last":  "assets/poster/stop__intro.last.webp",
-                                "duration":  6.042,
+                                "duration":  8,
                                 "fps":  24,
-                                "loopPsnr":  42.5
+                                "loopPsnr":  29.2
                             },
                   "master":  {
                                  "loop":  "assets/video/stop__master.mp4",
