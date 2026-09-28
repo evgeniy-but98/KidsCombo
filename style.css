@@ -66,11 +66,13 @@ video.layer, .stop video { display: block; object-fit: cover; }
 .stop__todo { position: absolute; top: var(--inset-top); left: var(--inset-left); display: flex; gap: .6em; align-items: baseline; font: 500 13px/44px var(--font-text); color: var(--cream-dim); opacity: .7; }
 .stop__todo::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ember); align-self: center; }
 .stop__id { font-variant-numeric: tabular-nums; opacity: .6; }
+/* свет из центральной щели дверей: мягкая полоса — яркая середина, к краям тёплый свет уходит в прозрачность,
+   поэтому при растяжении по горизонтали (player.js: KF.doors) края остаются мягкими */
 .fx-light {
   position: absolute; inset: 0; z-index: 1000000; opacity: 0; pointer-events: none;
   transform-origin: center;
-  background: linear-gradient(90deg, #ffd79d, #fff3d8 38%, #fffdf7 50%, #fff3d8 62%, #ffd79d);
-  box-shadow: 0 0 80px 16px rgba(var(--glow), .8);
+  background: linear-gradient(90deg, rgba(255, 170, 90, 0) 0%, rgba(255, 196, 120, .45) 26%, rgba(255, 228, 180, .9) 40%,
+    #fff6e2 46%, #fffdf8 50%, #fff6e2 54%, rgba(255, 228, 180, .9) 60%, rgba(255, 196, 120, .45) 74%, rgba(255, 170, 90, 0) 100%);
 }
 
 /* круглые полупрозрачные кнопки над видео: подложка ради читаемости на подвижном фоне */

@@ -93,18 +93,39 @@
       a: [{ transform: S(1) }, { transform: S(1.08) }],
       b: [{ opacity: 0, transform: S(1.04) }, { opacity: 1, transform: S(1) }],
     }),
-    // Двери остаются закрытыми: свет из центральной щели заполняет кадр и открывает комнату.
+    // Двери остаются закрытыми: свет из центральной щели разгорается, раскрывается на весь кадр и открывает комнату.
+    // .fx-light — мягкая полоса (яркая середина, края прозрачные), растягивается по горизонтали от щели;
+    // рост ускоряется (шаги по scaleX), чтобы свет сначала разгорался, а потом заливал кадр.
     doors: () => ({
       easing: 'linear',
       a: [{ opacity: 1 }, { opacity: 1, offset: 0.55 }, { opacity: 0, offset: 0.78 }],
-      fx: [{ opacity: 0, transform: 'scaleX(0.002)' }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.58, easing: EASE_IN_OUT }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.68 }, { opacity: 0, transform: 'scaleX(1.05)' }],
+      fx: [
+        { opacity: 0, transform: 'scaleX(0.012)' },
+        { opacity: 1, transform: 'scaleX(0.02)', offset: 0.14 },  // щель разгорается
+        { opacity: 1, transform: 'scaleX(0.12)', offset: 0.3 },
+        { opacity: 1, transform: 'scaleX(0.7)', offset: 0.44 },   // свет раскрывается
+        { opacity: 1, transform: 'scaleX(3)', offset: 0.54 },
+        { opacity: 1, transform: 'scaleX(12)', offset: 0.6 },     // заливает кадр
+        { opacity: 1, transform: 'scaleX(12)', offset: 0.68 },
+        { opacity: 0, transform: 'scaleX(12)' },
+      ],
       b: [{ opacity: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 1, offset: 0.8 }, { opacity: 1 }],
     }),
+    // Обратно на обложку: комната растворяется в свете, свет собирается обратно в щель закрытых дверей.
     doorsBack: () => ({
       easing: 'linear',
-      a: [{ opacity: 1 }, { opacity: 1, offset: 0.5 }, { opacity: 0, offset: 0.76 }],
-      fx: [{ opacity: 0, transform: 'scaleX(0.002)' }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.55, easing: EASE_IN_OUT }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.65 }, { opacity: 0, transform: 'scaleX(1.05)' }],
-      b: [{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1, offset: 0.78 }, { opacity: 1 }],
+      a: [{ opacity: 1 }, { opacity: 1, offset: 0.22 }, { opacity: 0, offset: 0.4 }],
+      fx: [
+        { opacity: 0, transform: 'scaleX(12)' },
+        { opacity: 1, transform: 'scaleX(12)', offset: 0.3 },
+        { opacity: 1, transform: 'scaleX(12)', offset: 0.44 },
+        { opacity: 1, transform: 'scaleX(3)', offset: 0.52 },
+        { opacity: 1, transform: 'scaleX(0.7)', offset: 0.62 },
+        { opacity: 1, transform: 'scaleX(0.12)', offset: 0.76 },
+        { opacity: 1, transform: 'scaleX(0.02)', offset: 0.88 },
+        { opacity: 0, transform: 'scaleX(0.012)' },
+      ],
+      b: [{ opacity: 0 }, { opacity: 0, offset: 0.38 }, { opacity: 1, offset: 0.52 }, { opacity: 1 }],
     }),
   };
 
