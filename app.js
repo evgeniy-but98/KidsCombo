@@ -17,7 +17,7 @@
     nav.busy = true;
     document.body.classList.add('is-moving');
     nav.dir = Math.sign(idx(id) - idx(current));
-    if (current === COVER) music.want(true); // двери открываются — синхронно, пока жива активация клика
+    if (current === COVER) music.want(true); // музыка начинается по нажатию «Открыть»
     if (id === COVER) music.want(false);     // возврат на обложку — затихание
     await hideText();
     await P.go(id, hops);
@@ -94,8 +94,8 @@
   $('.open').addEventListener('click', () => step(1));
 
   // ---------- музыка ----------
-  // Стартует при открытии дверей с fade-in. Колесо не считается активацией: если play() отклонён,
-  // музыка запустится на первый клик/клавишу. Нет файла — кнопка звука скрыта, всё работает молча.
+  // На обложке музыка включается кнопкой звука или при нажатии «Открыть».
+  // Браузер требует действие пользователя для звука; колесо не считается активацией.
   const muteBtn = $('.mute');
   const music = (() => {
     const src = (window.MANIFEST || {}).music;
@@ -118,7 +118,7 @@
     }
     function apply() {
       if (!wanted || muted) return fade(0, cfg.fadeOut, () => a.pause());
-      if (a.paused) a.play().then(() => fade(cfg.volume, cfg.fadeIn), arm);
+      if (a.paused) a.play().then(() => { if (wanted && !muted) fade(cfg.volume, cfg.fadeIn); else a.pause(); }, arm);
       else fade(cfg.volume, cfg.fadeIn);
     }
     const acts = ['pointerdown', 'pointerup', 'touchend', 'keydown'];
@@ -128,16 +128,25 @@
       const go = () => { armed = false; acts.forEach(e => removeEventListener(e, go, true)); apply(); };
       acts.forEach(e => addEventListener(e, go, true));
     }
+    function syncButton() {
+      const off = muted || !wanted;
+      muteBtn.setAttribute('aria-pressed', off);
+      muteBtn.setAttribute('aria-label', off ? 'Включить музыку' : 'Выключить музыку');
+      muteBtn.title = off ? 'Включить музыку' : 'Выключить музыку';
+    }
+    syncButton();
     return {
       audio: a,
-      want(on) { wanted = on; apply(); },
-      unlock() { if (a.paused && !wanted) a.play().then(() => { if (!wanted) a.pause(); }, () => {}); },
-      toggle() { muted = !muted; muteBtn.setAttribute('aria-pressed', muted); apply(); },
+      want(on) { wanted = on; syncButton(); apply(); },
+      toggle() {
+        if (!wanted) { wanted = true; muted = false; }
+        else muted = !muted;
+        syncButton();
+        apply();
+      },
     };
   })();
   muteBtn.addEventListener('click', () => music.toggle());
-  // любой клик на обложке заранее «разблокирует» аудио (play → сразу pause)
-  addEventListener('pointerdown', () => { if (current === COVER) music.unlock(); });
 
   // ---------- текст слайдов ----------
   // Шаблоны: title | text | text-image | gallery | palette | quote | video; none — без оверлея.

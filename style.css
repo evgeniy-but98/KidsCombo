@@ -67,8 +67,10 @@ video.layer, .stop video { display: block; object-fit: cover; }
 .stop__todo::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ember); align-self: center; }
 .stop__id { font-variant-numeric: tabular-nums; opacity: .6; }
 .fx-light {
-  position: absolute; inset: -20%; z-index: 1000000; opacity: 0; pointer-events: none;
-  background: radial-gradient(closest-side, #fff9ef 0%, #ffe6b8 35%, rgba(255, 196, 120, .85) 60%, rgba(255, 150, 70, 0) 100%);
+  position: absolute; inset: 0; z-index: 1000000; opacity: 0; pointer-events: none;
+  transform-origin: center;
+  background: linear-gradient(90deg, #ffd79d, #fff3d8 38%, #fffdf7 50%, #fff3d8 62%, #ffd79d);
+  box-shadow: 0 0 80px 16px rgba(var(--glow), .8);
 }
 
 /* круглые полупрозрачные кнопки над видео: подложка ради читаемости на подвижном фоне */

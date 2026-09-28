@@ -93,17 +93,18 @@
       a: [{ transform: S(1) }, { transform: S(1.08) }],
       b: [{ opacity: 0, transform: S(1.04) }, { opacity: 1, transform: S(1) }],
     }),
+    // Двери остаются закрытыми: свет из центральной щели заполняет кадр и открывает комнату.
     doors: () => ({
       easing: 'linear',
-      a: [{ transform: S(1), easing: EASE_IN_OUT }, { transform: S(1.35), offset: 0.6 }, { transform: S(1.35) }],
-      fx: [{ opacity: 0, transform: S(0.35), easing: EASE_IN_OUT }, { opacity: 1, transform: S(1.6), offset: 0.55, easing: EASE_OUT }, { opacity: 0, transform: S(2.2) }],
-      b: [{ opacity: 0, transform: S(1.08) }, { opacity: 0, transform: S(1.08), offset: 0.5, easing: EASE_OUT }, { opacity: 1, offset: 0.75 }, { opacity: 1, transform: S(1) }],
+      a: [{ opacity: 1 }, { opacity: 1, offset: 0.55 }, { opacity: 0, offset: 0.78 }],
+      fx: [{ opacity: 0, transform: 'scaleX(0.002)' }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.58, easing: EASE_IN_OUT }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.68 }, { opacity: 0, transform: 'scaleX(1.05)' }],
+      b: [{ opacity: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 1, offset: 0.8 }, { opacity: 1 }],
     }),
     doorsBack: () => ({
       easing: 'linear',
-      a: [{ transform: S(1), easing: EASE_IN_OUT }, { transform: S(1.08), offset: 0.5 }, { transform: S(1.08) }],
-      fx: [{ opacity: 0, transform: S(0.35), easing: EASE_IN_OUT }, { opacity: 1, transform: S(1.6), offset: 0.5, easing: EASE_OUT }, { opacity: 0, transform: S(2.2) }],
-      b: [{ opacity: 0, transform: S(1.35) }, { opacity: 0, transform: S(1.35), offset: 0.45, easing: EASE_OUT }, { opacity: 1, offset: 0.6 }, { opacity: 1, transform: S(1) }],
+      a: [{ opacity: 1 }, { opacity: 1, offset: 0.5 }, { opacity: 0, offset: 0.76 }],
+      fx: [{ opacity: 0, transform: 'scaleX(0.002)' }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.55, easing: EASE_IN_OUT }, { opacity: 1, transform: 'scaleX(1.05)', offset: 0.65 }, { opacity: 0, transform: 'scaleX(1.05)' }],
+      b: [{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1, offset: 0.78 }, { opacity: 1 }],
     }),
   };
 
