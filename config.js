@@ -259,7 +259,6 @@ window.CONFIG = {
       content: {
         layout: "finale", side: "center", theme: "dark", textDelay: 0.6,
         title: "Спасибо!",
-        caption: "PAPATON × RoRe Group",
       },
     },
   },
