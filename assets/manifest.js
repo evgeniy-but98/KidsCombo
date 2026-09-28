@@ -72,6 +72,13 @@ window.MANIFEST = {
                                   "duration":  4.042,
                                   "fps":  24,
                                   "loopPsnr":  39.4
+                              },
+                  "scene10":  {
+                                  "once":  "assets/video/once__scene10.mp4",
+                                  "poster":  "assets/poster/once__scene10.first.webp",
+                                  "last":  "assets/poster/once__scene10.last.webp",
+                                  "duration":  1.48,
+                                  "fps":  25
                               }
               },
     "edges":  {

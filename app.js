@@ -51,12 +51,13 @@
   const prev = $('.nav__prev'), next = $('.nav__next'), dots = $('.nav__dots'), count = $('.nav__count');
   const pad = n => String(n).padStart(2, '0');
   tour.forEach((id, i) => {
-    const c = (C.stops[id] || {}).content || {};
+    const c = (C.stops[id] || {}).content || {}, name = c.title || c.label || c.kicker || id;
     const li = document.createElement('li');
+    if ((C.stops[id] || {}).section) li.className = 'nav__item--section'; // разделы тритмента после истории
     const b = document.createElement('button');
     b.className = 'nav__dot';
-    b.setAttribute('aria-label', `${pad(i + 1)} — ${c.title || c.kicker || id}`);
-    b.title = c.title || c.kicker || id;
+    b.setAttribute('aria-label', `${pad(i + 1)} — ${name}`);
+    b.title = name;
     b.addEventListener('click', () => goTo(id));
     li.append(b);
     dots.append(li);
@@ -209,11 +210,14 @@
     sec.dataset.theme = c.theme || 'dark';
     if (c.size) sec.dataset.size = c.size;
     if (c.scrim === false) sec.dataset.scrim = 'off';
+    if (c.wide) sec.dataset.wide = '';
     if (c.box) { // место в долях видеокадра, см. style.css (#overlay --fw/--fh)
       sec.dataset.box = c.box.y == null ? 'bottom' : 'top';
       sec.dataset.mobile = c.mobile || 'top';
       sec.style.setProperty('--bx', c.box.x);
       sec.style.setProperty('--bw', c.box.w);
+      if (c.box.max) sec.style.setProperty('--bmax', c.box.max + 'rem');
+      if (c.box.avoid) sec.dataset.avoid = c.box.avoid; // не под кнопки справа вверху
       if (c.box.y != null) sec.style.setProperty('--by', c.box.y);
     }
     const texts = () => list(c.text).forEach(t => parts.push(el('p', 'slide__text', t)));
@@ -235,12 +239,35 @@
       case 'gallery': {
         texts();
         const imgs = list(c.images).slice(0, 6), g = el('ul', 'gallery');
-        const cols = imgs.length <= 3 ? imgs.length : imgs.length === 4 ? 2 : 3;
+        const cols = c.cols || (imgs.length <= 3 ? imgs.length : imgs.length === 4 ? 2 : 3);
         g.style.setProperty('--cols', cols);
         g.style.setProperty('--rows', Math.ceil(imgs.length / cols));
+        if (c.flow) g.dataset.flow = ''; // последовательность: стрелки между кадрами
         imgs.forEach(im => g.append(figure(im, null, 'li')));
         parts.push(g);
-        if (c.caption) parts.push(el('p', 'media__caption', c.caption));
+        list(c.caption).forEach(t => parts.push(el('p', 'media__caption', t)));
+        break;
+      }
+      case 'timeline': { // хронометраж: ширина отрезка пропорциональна длительности
+        texts();
+        const segs = list(c.timeline), total = segs.reduce((a, s) => a + s.t, 0), secs = t => String(t).replace('.', ',') + ' с';
+        const wrap = el('div', 'timeline'), ol = el('ol', 'timeline__track'), scale = el('div', 'timeline__scale');
+        segs.forEach(s => {
+          const li = el('li', 'timeline__seg'), bar = el('span', 'timeline__bar');
+          li.style.setProperty('--t', s.t);
+          if (s.poster) bar.style.backgroundImage = `url("${s.poster}")`;
+          li.append(bar, el('span', 'timeline__time', secs(s.t)), el('span', 'timeline__label', s.label));
+          ol.append(li);
+        });
+        scale.append(el('span', null, '0 с'), el('span', null, secs(total)));
+        wrap.append(ol, scale);
+        parts.push(wrap);
+        if (c.notes) {
+          const dl = el('dl', 'notes');
+          list(c.notes).forEach(n => { const d = el('div', 'notes__item'); d.append(el('dt', null, n.term), el('dd', null, n.text)); dl.append(d); });
+          parts.push(dl);
+        }
+        list(c.caption).forEach(t => parts.push(el('p', 'media__caption', t)));
         break;
       }
       case 'palette':
@@ -274,7 +301,8 @@
   // Сначала чистый кадр: текст проявляется через textDelay (~1.5 с) после прихода
   function showTextLater(id) {
     clearTimeout(textTimer);
-    const d = C.defaults.textDelay != null ? C.defaults.textDelay : 1.5;
+    const c = (C.stops[id] || {}).content || {};
+    const d = c.textDelay != null ? c.textDelay : C.defaults.textDelay != null ? C.defaults.textDelay : 1.5;
     textTimer = setTimeout(() => { if (current === id && !nav.busy) showText(id); }, d * 1000);
   }
   const textBtn = $('.text-toggle');
@@ -299,8 +327,16 @@
   // ---------- ввод ----------
   // Колесо/тачпад. Жест — серия событий без паузы 200 мс; один жест — максимум один шаг.
   // Жест, заставший переход или cooldown, сгорает целиком: инерция тачпада не пролистает лишнего.
+  // Плашка раздела со своей прокруткой (маленький экран): пока её есть куда крутить, колесо и свайп листают её, а не сайт.
+  const scroller = t => {
+    const b = t && t.closest && t.closest('.slide__block');
+    return b && /auto|scroll/.test(getComputedStyle(b).overflowY) && b.scrollHeight > b.clientHeight + 1 ? b : null;
+  };
+  const canScroll = (b, dy) => (dy > 0 ? b.scrollTop + b.clientHeight < b.scrollHeight - 1 : dy < 0 && b.scrollTop > 0);
   let acc = 0, lastWheel = 0, used = false;
   addEventListener('wheel', e => {
+    const b = scroller(e.target);
+    if (b && Math.abs(e.deltaY) >= Math.abs(e.deltaX) && canScroll(b, e.deltaY)) { lastWheel = performance.now(); used = true; return; }
     e.preventDefault();
     const now = performance.now();
     if (now - lastWheel > 200) { acc = 0; used = false; }
@@ -334,12 +370,13 @@
 
   // Свайпы: вверх/влево — вперёд, вниз/вправо — назад. Прокрутку и pull-to-refresh глушит CSS (overscroll-behavior).
   let t0 = null;
-  addEventListener('touchstart', e => { const t = e.touches[0]; t0 = { x: t.clientX, y: t.clientY, at: performance.now() }; }, { passive: true });
+  addEventListener('touchstart', e => { const t = e.touches[0], b = scroller(e.target); t0 = { x: t.clientX, y: t.clientY, at: performance.now(), b, top: b ? b.scrollTop : 0 }; }, { passive: true });
   addEventListener('touchend', e => {
     if (!t0) return;
     const t = e.changedTouches[0], dx = t.clientX - t0.x, dy = t.clientY - t0.y;
-    const quick = performance.now() - t0.at < 800;
+    const quick = performance.now() - t0.at < 800, scrolled = t0.b && t0.b.scrollTop !== t0.top;
     t0 = null;
+    if (scrolled) return; // жест прокрутил плашку раздела — слайд не меняем
     if (!quick || Math.max(Math.abs(dx), Math.abs(dy)) < 50) return;
     step((Math.abs(dx) > Math.abs(dy) ? dx : dy) < 0 ? 1 : -1);
   });

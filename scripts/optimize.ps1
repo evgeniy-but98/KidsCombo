@@ -12,6 +12,8 @@
 #   stop__<id>.mp4        цикл остановки
 #   tr__<from>__<to>.mp4  пролёт (обратный генерируется реверсом, если нет ручного tr__<to>__<from>)
 #   still__<id>.webp|png|jpg  статичная картинка для остановки без цикла
+#   once__<id>.mp4        играет один раз, последний кадр остаётся (логотип); не цикл — стык не проверяется,
+#                         цвет размечается как BT.709, чтобы сплошной фон страницы совпадал с фоном ролика
 param([switch]$Force, [switch]$DryRun, [string[]]$Only, [int]$MaxHeight = 0)
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })   # -File передаёт "a,b" одной строкой
 
@@ -59,7 +61,7 @@ $Missing = New-Object System.Collections.ArrayList
 function CheckRef($where, $path) {
     if ($path -and -not (Test-Path -LiteralPath (Join-Path $Root $path) -PathType Leaf)) { [void]$Missing.Add("  $path  ($where)") }
 }
-foreach ($id in $stops.Keys) { foreach ($f in 'loop', 'poster', 'last', 'still') { CheckRef "stops.$id.$f" $stops[$id][$f] } }
+foreach ($id in $stops.Keys) { foreach ($f in 'loop', 'once', 'poster', 'last', 'still') { CheckRef "stops.$id.$f" $stops[$id][$f] } }
 foreach ($key in $edges.Keys) { foreach ($f in 'src', 'first', 'last') { CheckRef "edges['$key'].$f" $edges[$key][$f] } }
 CheckRef 'music' $music
 if ($Missing.Count) {
@@ -99,6 +101,10 @@ foreach ($f in $files) {
         $r = Join-Path $Out "video\tr__${b}__$a.rev.mp4"
         Plan 'edge' "$b>$a" $f.FullName $r ($edges["$b>$a"].src -eq (Rel $r)) "$a>$b"
     }
+    elseif ($f.Name -match "^once__($IdRe)$VideoExt") {
+        $id = $Matches[1]; $o = Join-Path $Out "video\once__$id.mp4"
+        Plan 'once' $id $f.FullName $o ($stops[$id].once -eq (Rel $o))
+    }
     elseif ($f.Name -match "^still__($IdRe)$ImageExt") {
         $id = $Matches[1]; $o = Join-Path $Out "still\$id.webp"
         Plan 'still' $id $f.FullName $o ($stops[$id].still -eq (Rel $o))
@@ -133,7 +139,7 @@ function Messages {
     foreach ($n in $Notes) { Write-Host "  $n" -ForegroundColor DarkGray }
 }
 function Kept {
-    $ws = @($Work | Where-Object { $_.kind -in 'stop', 'still' } | ForEach-Object { $_.key })
+    $ws = @($Work | Where-Object { $_.kind -in 'stop', 'still', 'once' } | ForEach-Object { $_.key })
     $we = @($Work | Where-Object { $_.kind -eq 'edge' } | ForEach-Object { $_.key })
     $ks = @($stops.Keys | Where-Object { $ws -notcontains $_ })
     $ke = @($edges.Keys | Where-Object { $we -notcontains $_ })
@@ -207,8 +213,14 @@ function Row($j) {
 function EncodeVideo($j) {
     if ($j.action -ne 'в манифест') {
         $vf = @(ScaleVf) + $(if ($j.reverseOf) { @('reverse') } else { @() })
+        # once: явная разметка BT.709 — иначе браузеры по-разному пересчитывают цвет и фон ролика не совпадёт с фоном страницы
+        $color = @()
+        if ($j.kind -eq 'once') {
+            $vf += 'scale=out_color_matrix=bt709:out_range=tv', 'setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv'
+            $color = @('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv')
+        }
         $a = @('-i', $j.source); if ($vf.Count) { $a += '-vf', ($vf -join ',') }
-        FFTo ($a + $VideoArgs + @('-an')) $j.target
+        FFTo ($a + $VideoArgs + $color + @('-an')) $j.target
     }
     # постеры: первый и последний кадр из уже сжатого видео (совпадают с тем, что увидит зритель)
     $base = Join-Path $Out ('poster\' + [IO.Path]::GetFileNameWithoutExtension($j.target))
@@ -244,6 +256,12 @@ try {
                 $Touched["stop:$($j.key)"] = $true
             }
             'edge' { $edges[$j.key] = EncodeVideo $j; $Touched["edge:$($j.key)"] = $true }
+            'once' { # без проверки стыка цикла: ролик не повторяется
+                $v = EncodeVideo $j
+                if (-not $stops[$j.key]) { $stops[$j.key] = [ordered]@{} }
+                $s = $stops[$j.key]
+                $s.once = $v.src; $s.poster = $v.first; $s.last = $v.last; $s.duration = $v.duration; $s.fps = $v.fps
+            }
             'still' {
                 EncodeImage $j 82
                 if (-not $stops[$j.key]) { $stops[$j.key] = [ordered]@{} }
@@ -292,7 +310,7 @@ foreach ($key in $edges.Keys) {
 
 # ---------- файлы, на которые манифест не ссылается: не удаляются, только перечисляются ----------
 $Refs = @{}
-foreach ($s in $stops.Values) { foreach ($f in 'loop', 'poster', 'last', 'still') { if ($s[$f]) { $Refs[(Join-Path $Root $s[$f]).Replace('/', '\')] = $true } } }
+foreach ($s in $stops.Values) { foreach ($f in 'loop', 'once', 'poster', 'last', 'still') { if ($s[$f]) { $Refs[(Join-Path $Root $s[$f]).Replace('/', '\')] = $true } } }
 foreach ($e in $edges.Values) { foreach ($f in 'src', 'first', 'last') { if ($e[$f]) { $Refs[(Join-Path $Root $e[$f]).Replace('/', '\')] = $true } } }
 $Unused = @(foreach ($d in 'video', 'poster', 'still') {
     Get-ChildItem (Join-Path $Out $d) -File -ErrorAction SilentlyContinue | Where-Object { -not $Refs[$_.FullName] } | ForEach-Object { Rel $_.FullName }

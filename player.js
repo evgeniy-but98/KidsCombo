@@ -141,8 +141,14 @@
       v.className = 'layer';
       L = { k, kind: 'edge', id, el: v, videos: [v], fps: e.fps || 24 };
     } else {
-      const s = M.stops[id] || {};
-      const el = div('layer stop' + (s.loop ? '' : s.still ? ' stop--still' : ' stop--empty'));
+      const s = M.stops[id] || {}, cs = C.stops[id] || {};
+      const src = s.loop || s.once; // once — играет один раз и держит последний кадр (логотип)
+      const el = div('layer stop' + (src ? '' : s.still ? ' stop--still' : cs.backdrop ? ' stop--backdrop' : ' stop--empty'));
+      // Кадр целиком на любом экране (CONFIG.stops.<id>.frame): другой формат — логотип 2:1, поля залиты цветом фона ролика
+      if (cs.frame && cs.frame.fit === 'contain') {
+        el.dataset.fitAll = 'contain';
+        if (cs.frame.background) el.style.backgroundColor = cs.frame.background;
+      }
       // Узкий экран: кадр целиком, свободное место — заполнение (CONFIG.stops.<id>.mobileFrame, см. style.css)
       const mf = (C.stops[id] || {}).mobileFrame;
       let cv = null;
@@ -161,12 +167,13 @@
         el.append(f);
       }
       const bg = div('stop__bg');
-      if (s.poster) bg.style.backgroundImage = `url("${s.poster}")`;
+      const poster = s.poster || (!src && !s.still && cs.backdrop); // раздел тритмента: размытый утверждённый кадр
+      if (poster) bg.style.backgroundImage = `url("${poster}")`;
       el.append(bg);
       const videos = [];
-      if (s.loop) for (let i = 0; i < (D.loopMode === 'pingpong' ? 2 : 1); i++) { const v = video(s.loop); el.append(v); videos.push(v); }
-      if (!s.loop && !s.still) { el.append(div('stop__todo', 'кадр в работе')); el.lastChild.append(div('stop__id', id)); }
-      L = { k, kind: 'stop', id, el, videos, bg, fps: s.fps || 24, cv, cx: cv && cv.getContext('2d') };
+      if (src) for (let i = 0; i < (s.loop && D.loopMode === 'pingpong' ? 2 : 1); i++) { const v = video(src); el.append(v); videos.push(v); }
+      if (!src && !s.still && !cs.backdrop) { el.append(div('stop__todo', 'кадр в работе')); el.lastChild.append(div('stop__id', id)); }
+      L = { k, kind: 'stop', id, el, videos, bg, once: !!s.once, fps: s.fps || 24, cv, cx: cv && cv.getContext('2d') };
     }
     L.el.dataset.layer = k;
     stage.insertBefore(L.el, fx);
@@ -270,6 +277,7 @@
         L.kb = L.bg.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.04)' }], { duration: 20000, easing: 'linear', fill: 'forwards' });
       return;
     }
+    if (L.once) { if (!state.busy) playHold(L); return; } // разовый ролик — только после прихода, не во время перехода
     const token = L.token = {};
     const [a, b] = L.videos;
     if (!b) { a.loop = true; a.playbackRate = state.slow; a._rate = 1; play(a); return; }
@@ -284,6 +292,12 @@
         next._want = false; next.pause(); next.currentTime = 0; // первый перематывается под ним
       }
     })();
+  }
+  // Разовый ролик остановки (once, логотип): с начала, один раз, затем остаётся последний кадр
+  function playHold(L) {
+    const v = L.videos[0];
+    v.loop = false; v._rate = 1; v.playbackRate = state.slow;
+    play(v);
   }
   function stopLoop(L) {
     L.token = null;
@@ -347,6 +361,8 @@
       }
       state.current = to;
       if (cur.kind !== 'stop' || cur.id !== to) { const T = stopLayer(to); T.el.style.zIndex = ++z; T.el.style.opacity = 1; startLoop(T); hide(cur); }
+      const T = stopLayer(to);
+      if (T.once) playHold(T); // переход закончился — логотип играет целиком, а не под растворением
     } finally {
       state.busy = false; state.target = null; state.segment = null;
     }

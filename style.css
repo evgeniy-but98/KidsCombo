@@ -41,6 +41,12 @@ button { font: inherit; color: inherit; touch-action: manipulation; user-select:
 video.layer, .stop video { display: block; object-fit: cover; }
 .stop video, .stop__bg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .stop__bg { background: center / cover no-repeat; }
+/* кадр целиком на любом экране (stops.<id>.frame): логотип 2:1 не растягивается и не обрезается,
+   поля — сплошной цвет фона самого ролика (задан на слое) */
+.stop[data-fit-all="contain"] video { object-fit: contain; }
+.stop[data-fit-all="contain"] .stop__bg { background-size: contain; }
+/* раздел тритмента (stops.<id>.backdrop): размытый утверждённый кадр под плашкой, без пометки «кадр в работе» */
+.stop--backdrop .stop__bg { filter: blur(28px) saturate(1.1) brightness(.42); transform: scale(1.12); }
 /* заполнение вокруг кадра целиком (mobileFrame, только узкие экраны — см. конец файла) */
 .stop__fill { display: none; position: absolute; inset: 0; overflow: hidden; background: var(--ink) center / cover no-repeat; }
 .stop__fill canvas {
@@ -119,6 +125,10 @@ body:not(.on-cover) .open, .is-moving .open {
   background: rgba(255, 244, 226, .42); transition: background-color 200ms ease, box-shadow 200ms ease;
 }
 .nav__dot[aria-current]::after { background: var(--cream); box-shadow: 0 0 0 3px rgba(255, 244, 226, .22), 0 0 12px rgba(var(--glow), .55); }
+/* разделы тритмента после истории: точки-кольца, отделены небольшим промежутком */
+li:not(.nav__item--section) + .nav__item--section { margin-left: 10px; }
+.nav__item--section .nav__dot::after { background: none; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 226, .55); width: 7px; height: 7px; }
+.nav__item--section .nav__dot[aria-current]::after { background: var(--cream); box-shadow: 0 0 0 3px rgba(255, 244, 226, .22), 0 0 12px rgba(var(--glow), .55); }
 @media (hover: hover) and (pointer: fine) { .nav__dot:hover::after { background: rgba(255, 244, 226, .8); } }
 .nav__count { min-width: 5.2em; text-align: center; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: .06em; color: var(--cream-dim); }
 
@@ -141,7 +151,7 @@ body:not(.on-cover) .open, .is-moving .open {
 .slide__scrim { position: absolute; inset: 0; opacity: 0; transition: opacity 700ms var(--ease-out); --s: 26, 15, 10; }
 .slide[data-theme="light"] .slide__scrim { --s: 255, 244, 226; }
 /* у light-плашки своя непрозрачная бумага — молочная виньетка поверх видео ей не нужна */
-.slide[data-theme="light"]:is([data-layout="text"], [data-layout="text-image"], [data-layout="gallery"], [data-layout="palette"], [data-layout="video"]) .slide__scrim { display: none; }
+.slide[data-theme="light"]:is([data-layout="text"], [data-layout="text-image"], [data-layout="gallery"], [data-layout="palette"], [data-layout="video"], [data-layout="timeline"]) .slide__scrim { display: none; }
 .slide.is-in .slide__scrim { opacity: 1; }
 [data-side="left"] > .slide__scrim { background: linear-gradient(90deg, rgba(var(--s), .84) 0%, rgba(var(--s), .52) 36%, rgba(var(--s), 0) 66%); }
 [data-side="right"] > .slide__scrim { background: linear-gradient(270deg, rgba(var(--s), .84) 0%, rgba(var(--s), .52) 36%, rgba(var(--s), 0) 66%); }
@@ -171,13 +181,13 @@ body:not(.on-cover) .open, .is-moving .open {
 .slide.is-in .slide__block > * { opacity: 1; transform: none; filter: none; }
 
 /* плашка «морозное стекло» под текстовыми шаблонами; light — бумажная карточка */
-.slide:is([data-layout="text"], [data-layout="text-image"], [data-layout="gallery"], [data-layout="palette"], [data-layout="video"]) .slide__block {
+.slide:is([data-layout="text"], [data-layout="text-image"], [data-layout="gallery"], [data-layout="palette"], [data-layout="video"], [data-layout="timeline"]) .slide__block {
   padding: clamp(24px, 2.6vw, 40px); border-radius: 16px;
   background: rgba(26, 15, 10, .34); border: 1px solid rgba(255, 244, 226, .12);
   -webkit-backdrop-filter: blur(18px) saturate(120%); backdrop-filter: blur(18px) saturate(120%);
 }
 .slide[data-theme="light"] .slide__block { color: var(--ink); }
-.slide[data-theme="light"]:is([data-layout="text"], [data-layout="text-image"], [data-layout="gallery"], [data-layout="palette"], [data-layout="video"]) .slide__block {
+.slide[data-theme="light"]:is([data-layout="text"], [data-layout="text-image"], [data-layout="gallery"], [data-layout="palette"], [data-layout="video"], [data-layout="timeline"]) .slide__block {
   background: rgba(255, 246, 232, .9); border-color: rgba(255, 255, 255, .6);
 }
 
@@ -240,9 +250,15 @@ body:not(.on-cover) .open, .is-moving .open {
 .slide[data-box] { display: block; padding: 0; }
 .slide[data-box] > .slide__block {
   position: absolute; max-width: calc(100vw - var(--inset-left) - var(--inset-right));
-  left: max(var(--inset-left), calc(var(--fx) + var(--fw) * var(--bx) / 100));
-  width: clamp(17rem, calc(var(--fw) * var(--bw) / 100), 40rem);
+  --bwpx: clamp(17rem, calc(var(--fw) * var(--bw) / 100), var(--bmax, 40rem));
+  /* плашка у правого края кадра не уходит за экран, где кадр обрезан (16:10 и уже) */
+  --bleft: clamp(var(--inset-left), calc(var(--fx) + var(--fw) * var(--bx) / 100), calc(100vw - var(--bwpx) - var(--inset-right)));
+  width: var(--bwpx); left: var(--bleft);
 }
+/* box.avoid — не заходить под кнопки звука и текста в правом верхнем углу:
+   below — опуститься под них (колонка справа), left — закончиться левее них (полоса вдоль верха) */
+.slide[data-box="top"][data-avoid="below"] > .slide__block { top: max(calc(var(--inset-top) + 56px), calc(var(--fy) + var(--fh) * var(--by) / 100)); }
+.slide[data-avoid="left"] > .slide__block { width: min(var(--bwpx), calc(100vw - var(--bleft) - var(--inset-right) - 108px)); }
 .slide[data-box="top"] > .slide__block { top: max(var(--inset-top), calc(var(--fy) + var(--fh) * var(--by) / 100)); }
 .slide[data-box="bottom"] > .slide__block { bottom: calc(var(--inset-bottom) + 84px); }
 .slide[data-scrim="off"] > .slide__scrim { display: none; }
@@ -252,6 +268,46 @@ body:not(.on-cover) .open, .is-moving .open {
 .slide[data-size="compact"] .slide__kicker { font-size: clamp(15px, 1.05vw, 19px); margin-bottom: .3em; }
 .slide[data-size="compact"] .slide__title { font-size: clamp(24px, min(2.4vw, 4.3vh), 44px); margin-bottom: .3em; }
 .slide[data-size="compact"] .slide__text { max-width: none; font-size: clamp(15px, min(1vw, 1.8vh), 17.5px); line-height: 1.5; }
+
+/* полоса: заголовок слева, текст справа — для узкой свободной полосы над объектами (globes) */
+.slide[data-size="strip"] .slide__block {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.75fr); column-gap: clamp(18px, 2vw, 36px); align-items: center;
+  padding: clamp(14px, 1.3vw, 22px) clamp(18px, 1.7vw, 30px);
+}
+.slide[data-size="strip"] .slide__kicker { grid-column: 1; margin-bottom: .2em; font-size: clamp(15px, 1.05vw, 19px); }
+.slide[data-size="strip"] .slide__title { grid-column: 1; margin: 0; font-size: clamp(24px, min(2.2vw, 4vh), 40px); }
+.slide[data-size="strip"] .slide__text { grid-column: 2; grid-row: 1 / span 2; max-width: none; font-size: clamp(15px, min(1vw, 1.8vh), 17.5px); line-height: 1.5; }
+
+/* разделы тритмента: широкая плашка по центру */
+.slide[data-wide] .slide__block { width: min(80rem, 92vw); }
+/* галерея-последовательность: стрелка между кадрами на уровне середины картинки */
+.gallery[data-flow] { column-gap: 30px; }
+.gallery[data-flow] > li { position: relative; }
+.gallery[data-flow] > li + li::before {
+  content: "→"; position: absolute; left: -23px; top: 0; margin-top: calc(28.125% - .55em);
+  font: 600 16px/1 var(--font-text); color: rgb(var(--glow));
+}
+
+/* хронометраж ролика: ширина отрезка пропорциональна длительности, в отрезке — кадр сцены */
+.timeline { width: 100%; margin-top: 1.1em; }
+.timeline__track { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.timeline__seg { flex: var(--t) 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.timeline__bar {
+  display: block; height: clamp(46px, 7.5vh, 80px); border-radius: 6px;
+  background: rgba(255, 244, 226, .12) center / cover no-repeat; box-shadow: inset 0 0 0 1px rgba(255, 244, 226, .14);
+}
+.timeline__time { font: 600 13px/1.2 var(--font-text); letter-spacing: .02em; font-variant-numeric: tabular-nums; color: rgb(var(--glow)); }
+.timeline__label { font-size: 13px; line-height: 1.3; color: rgba(255, 244, 226, .86); overflow-wrap: break-word; hyphens: auto; }
+.timeline__scale {
+  display: flex; justify-content: space-between; margin-top: 10px; padding-top: 5px; border-top: 1px solid rgba(255, 244, 226, .18);
+  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--cream-dim);
+}
+/* заметки о звуке: три колонки «термин — описание» */
+.notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 28px; width: 100%; margin: 1.3em 0 .2em; }
+.notes__item { min-width: 0; }
+.notes dt { margin-bottom: .3em; font: 600 clamp(16px, 1.1vw, 19px)/1.2 var(--font-display); color: rgb(var(--glow)); }
+.notes dd { margin: 0; font-size: clamp(15px, 1vw, 17px); line-height: 1.5; color: rgba(255, 244, 226, .86); }
+.slide[data-layout="timeline"] .media__caption { margin-top: .5em; }
 
 /* «Читать» — только у свёрнутой плашки на узких экранах (см. ниже) */
 .slide__open { display: none; }
@@ -315,6 +371,23 @@ body:not(.on-cover) .open, .is-moving .open {
   .slide > .slide__scrim { background: linear-gradient(0deg, rgba(var(--s), .9) 0%, rgba(var(--s), .62) 45%, rgba(var(--s), 0) 78%) !important; }
   .slide__block, .slide[data-layout] .slide__block { width: 100%; align-items: flex-start; }
   .gallery { --cols: 2 !important; width: 100%; }
+  .gallery[data-flow] > li::before { display: none; } /* в две колонки стрелки путают порядок */
+  /* разделы тритмента: кадры списком — миниатюра слева, подпись справа */
+  .slide[data-wide] .gallery { --cols: 1 !important; gap: 8px; margin-top: .8em; }
+  .slide[data-wide] .gallery .media { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: 12px; align-items: center; }
+  .slide[data-wide] .gallery .media__caption { margin: 0; font-size: 13px; }
+  .slide[data-wide] .slide__title { font-size: 28px; }
+  .slide[data-wide] .slide__text { font-size: 15px; line-height: 1.5; }
+  .slide[data-wide] .media__caption { font-size: 12px; }
+  .timeline { margin-top: .8em; }
+  .timeline__track { flex-direction: column; gap: 4px; }
+  .timeline__seg { flex: none; display: grid; grid-template-columns: 50px 40px minmax(0, 1fr); align-items: center; column-gap: 10px; }
+  .timeline__bar { height: 28px; }
+  .timeline__scale { margin-top: 6px; }
+  .notes { grid-template-columns: 1fr; gap: 4px; margin-top: .7em; }
+  .slide[data-layout="timeline"] .media__caption { margin-top: .35em; }
+  .notes__item { display: flex; gap: .5em; align-items: baseline; }
+  .notes dt { flex: none; margin: 0; }
   .slide[data-layout="text-image"] .media__frame { height: 22vh; }
   .palette { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -324,12 +397,33 @@ body:not(.on-cover) .open, .is-moving .open {
   .slide__quote { font-size: clamp(24px, 3.4vw, 40px); }
 }
 
+/* ---------- разделы тритмента на маленьких экранах: если не помещается — прокрутка внутри плашки ----------
+   (колесо и свайп листают сайт, только когда плашку дальше прокручивать некуда — см. app.js) */
+@media (max-width: 700px) {
+  .slide[data-wide] .slide__block {
+    overflow-y: auto; overscroll-behavior: contain;
+    max-height: calc(100vh - var(--inset-top) - 56px - var(--inset-bottom) - 72px);
+    max-height: calc(100dvh - var(--inset-top) - 56px - var(--inset-bottom) - 72px);
+  }
+  .slide[data-wide] { align-items: center; }
+}
+@media (max-height: 500px) and (min-width: 701px) {
+  .slide[data-wide] { padding: var(--inset-top) calc(var(--inset-right) + 110px) calc(var(--inset-bottom) + 64px) var(--inset-left); place-items: start stretch; }
+  .slide[data-wide] .slide__block {
+    width: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px;
+    max-height: calc(100vh - var(--inset-top) - var(--inset-bottom) - 64px);
+    max-height: calc(100dvh - var(--inset-top) - var(--inset-bottom) - 64px);
+  }
+  .slide[data-wide] .slide__title { font-size: 26px; }
+  .slide[data-wide] .slide__text, .slide[data-wide] .notes dd { font-size: 14px; }
+}
+
 /* ---------- телефон, узкие, почти квадратные и сверхширокие окна: кадр обрезан, под плашку нет места ----------
    Плашка с box сворачивается до заголовка в углу (вверху слева; mobile: "bottom" — внизу над навигацией),
    текст раскрывается кнопкой «Читать». Затемнение — только узкая полоса у нижнего края. */
 @media (max-width: 700px), (max-height: 500px), (max-aspect-ratio: 4/3), (min-aspect-ratio: 21/10) {
   #overlay .slide[data-box] > .slide__block {
-    left: var(--inset-left); width: auto; padding: 10px 14px 11px;
+    display: flex; left: var(--inset-left); width: auto; padding: 10px 14px 11px;
     max-width: min(24rem, calc(100vw - var(--inset-left) - var(--inset-right) - 108px), max(11rem, calc(var(--fw) * var(--bw) / 100)));
   }
   #overlay .slide[data-box][data-mobile="top"] > .slide__block { top: var(--inset-top); bottom: auto; }
@@ -409,6 +503,11 @@ body:not(.on-cover) .open, .is-moving .open {
     width: calc((100dvh - var(--inset-bottom) - 70px) * 1.7778); height: calc(100dvh - var(--inset-bottom) - 70px);
   }
   body[data-fit="contain"][data-frame="card"] #overlay { --fh: calc(var(--vh) * 100 - var(--inset-bottom) - 70px); --fy: 14px; }
+  /* свёрнутый заголовок — в свободной полосе слева от карточки, а не на кадре (у mobile: "box" — своя точка кадра) */
+  body[data-fit="contain"][data-frame="card"] #overlay .slide[data-box]:not([data-mobile="box"]) > .slide__block {
+    max-width: max(6.5rem, calc((100vw - var(--fw)) / 2 - var(--inset-left) - 8px));
+  }
+  body[data-fit="contain"][data-frame="card"] #overlay .slide[data-box]:not([data-mobile="box"]) .slide__title { font-size: 17px; }
   /* кадр невысокий: заголовок в одну строку, чтобы уместиться в свободную полосу над объектами */
   body[data-fit="contain"] #overlay .slide[data-box] > .slide__block { max-width: min(24rem, calc(100vw - var(--inset-left) - var(--inset-right) - 108px)); }
 }
