@@ -45,6 +45,7 @@ video.layer, .stop video { display: block; object-fit: cover; }
    поля — сплошной цвет фона самого ролика (задан на слое) */
 .stop[data-fit-all="contain"] video { object-fit: contain; }
 .stop[data-fit-all="contain"] .stop__bg { background-size: contain; }
+.stop[data-fit-all="contain"] .stop__fill { display: block; } /* пэкшот на 16:10 и 21:9: поля — размытое продолжение кадра */
 /* раздел тритмента (stops.<id>.backdrop): размытый утверждённый кадр под плашкой, без пометки «кадр в работе» */
 .stop--backdrop .stop__bg { filter: blur(28px) saturate(1.1) brightness(.42); transform: scale(1.12); }
 /* заполнение вокруг кадра целиком (mobileFrame, только узкие экраны — см. конец файла) */
@@ -130,6 +131,10 @@ li:not(.nav__item--section) + .nav__item--section { margin-left: 10px; }
 .nav__item--section .nav__dot::after { background: none; box-shadow: inset 0 0 0 1.5px rgba(255, 244, 226, .55); width: 7px; height: 7px; }
 .nav__item--section .nav__dot[aria-current]::after { background: var(--cream); box-shadow: 0 0 0 3px rgba(255, 244, 226, .22), 0 0 12px rgba(var(--glow), .55); }
 @media (hover: hover) and (pointer: fine) { .nav__dot:hover::after { background: rgba(255, 244, 226, .8); } }
+/* после логотипа: «Вперёд» с подписью — переход к режиссёрским решениям; сам кадр логотипа остаётся чистым */
+.nav__next-label { display: none; }
+.nav__next.nav__next--bridge { width: auto; padding: 0 12px 0 18px; border-radius: 22px; grid-auto-flow: column; gap: 8px; }
+.nav__next--bridge .nav__next-label { display: inline; font: 600 14px/1 var(--font-text); letter-spacing: .01em; white-space: nowrap; }
 .nav__count { min-width: 5.2em; text-align: center; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: .06em; color: var(--cream-dim); }
 
 /* ---------- текст слайдов ---------- */
@@ -247,6 +252,9 @@ li:not(.nav__item--section) + .nav__item--section { margin-left: 10px; }
   --fw: max(100vw, var(--vh) * 177.78); --fh: max(var(--vh) * 100, 56.25vw);
   --fx: calc((100vw - var(--fw)) / 2); --fy: calc((var(--vh) * 100 - var(--fh)) / 2);
 }
+/* остановка с кадром целиком на любом экране (frame.fit = "contain"): плашка считается по вписанному кадру
+   (правила для узких экранов ниже по файлу перекрывают это) */
+body[data-fit-all="contain"] #overlay { --fw: min(100vw, var(--vh) * 177.78); --fh: min(var(--vh) * 100, 56.25vw); }
 .slide[data-box] { display: block; padding: 0; }
 .slide[data-box] > .slide__block {
   position: absolute; max-width: calc(100vw - var(--inset-left) - var(--inset-right));
@@ -288,20 +296,28 @@ li:not(.nav__item--section) + .nav__item--section { margin-left: 10px; }
   font: 600 16px/1 var(--font-text); color: rgb(var(--glow));
 }
 
-/* хронометраж ролика: ширина отрезка пропорциональна длительности, в отрезке — кадр сцены */
-.timeline { width: 100%; margin-top: 1.1em; }
-.timeline__track { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.timeline__seg { flex: var(--t) 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* хронометраж ролика — главный элемент раздела: ширина отрезка пропорциональна длительности, в отрезке — кадр сцены */
+.timeline { width: 100%; margin-top: 1.3em; }
+.timeline__track { display: flex; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.timeline__seg { flex: var(--t) 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .timeline__bar {
-  display: block; height: clamp(46px, 7.5vh, 80px); border-radius: 6px;
+  display: block; height: clamp(72px, 15vh, 170px); border-radius: 8px;
   background: rgba(255, 244, 226, .12) center / cover no-repeat; box-shadow: inset 0 0 0 1px rgba(255, 244, 226, .14);
 }
-.timeline__time { font: 600 13px/1.2 var(--font-text); letter-spacing: .02em; font-variant-numeric: tabular-nums; color: rgb(var(--glow)); }
-.timeline__label { font-size: 13px; line-height: 1.3; color: rgba(255, 244, 226, .86); overflow-wrap: break-word; hyphens: auto; }
+.timeline__time { font: 600 clamp(15px, 1.05vw, 18px)/1.2 var(--font-text); letter-spacing: .02em; font-variant-numeric: tabular-nums; color: rgb(var(--glow)); }
+.timeline__label { font-size: clamp(14px, .95vw, 16px); line-height: 1.3; color: rgba(255, 244, 226, .9); overflow-wrap: break-word; hyphens: auto; }
+.timeline__len { display: none; } /* длина отрезка полосой — только в списке на телефоне */
+/* шкала 0–20 с с засечками каждые 5 секунд */
 .timeline__scale {
-  display: flex; justify-content: space-between; margin-top: 10px; padding-top: 5px; border-top: 1px solid rgba(255, 244, 226, .18);
-  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--cream-dim);
+  position: relative; height: 1.6em; margin-top: 14px; border-top: 1px solid rgba(255, 244, 226, .28);
+  font-size: clamp(13px, .9vw, 15px); font-variant-numeric: tabular-nums; color: var(--cream-dim);
 }
+.timeline__tick { position: absolute; top: 0; left: var(--at); translate: -50% 0; padding-top: 7px; white-space: nowrap; }
+.timeline__tick::before { content: ""; position: absolute; top: -1px; left: 50%; width: 1px; height: 6px; background: rgba(255, 244, 226, .5); }
+.timeline__tick:first-child { translate: 0 0; }
+.timeline__tick:first-child::before { left: 0; }
+.timeline__tick:last-child { translate: -100% 0; }
+.timeline__tick:last-child::before { left: auto; right: 0; }
 /* заметки о звуке: три колонки «термин — описание» */
 .notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 28px; width: 100%; margin: 1.3em 0 .2em; }
 .notes__item { min-width: 0; }
@@ -379,11 +395,15 @@ li:not(.nav__item--section) + .nav__item--section { margin-left: 10px; }
   .slide[data-wide] .slide__title { font-size: 28px; }
   .slide[data-wide] .slide__text { font-size: 15px; line-height: 1.5; }
   .slide[data-wide] .media__caption { font-size: 12px; }
+  /* на телефоне — список: кадр, длительность, подпись и полоса длины отрезка (5 с = вся ширина) */
   .timeline { margin-top: .8em; }
-  .timeline__track { flex-direction: column; gap: 4px; }
-  .timeline__seg { flex: none; display: grid; grid-template-columns: 50px 40px minmax(0, 1fr); align-items: center; column-gap: 10px; }
-  .timeline__bar { height: 28px; }
-  .timeline__scale { margin-top: 6px; }
+  .timeline__track { flex-direction: column; gap: 6px; }
+  .timeline__seg { flex: none; display: grid; grid-template-columns: 64px 44px minmax(0, 1fr); grid-template-rows: auto 4px; align-items: center; column-gap: 10px; row-gap: 3px; }
+  .timeline__bar { grid-row: span 2; height: 36px; border-radius: 6px; }
+  .timeline__time { font-size: 15px; }
+  .timeline__label { font-size: 14px; line-height: 1.25; }
+  .timeline__len { display: block; grid-column: 2 / span 2; width: calc(var(--t) / 5 * 100%); height: 3px; border-radius: 2px; background: rgba(var(--glow), .7); }
+  .timeline__scale { display: none; }
   .notes { grid-template-columns: 1fr; gap: 4px; margin-top: .7em; }
   .slide[data-layout="timeline"] .media__caption { margin-top: .35em; }
   .notes__item { display: flex; gap: .5em; align-items: baseline; }

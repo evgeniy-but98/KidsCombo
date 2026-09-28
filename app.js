@@ -50,13 +50,16 @@
   // ---------- UI ----------
   const prev = $('.nav__prev'), next = $('.nav__next'), dots = $('.nav__dots'), count = $('.nav__count');
   const pad = n => String(n).padStart(2, '0');
+  // История ролика (до логотипа) и режиссёрские решения после неё считаются отдельно
+  const isSection = id => !!(C.stops[id] || {}).section;
+  const story = tour.filter(id => !isSection(id)), decisions = tour.filter(isSection);
   tour.forEach((id, i) => {
     const c = (C.stops[id] || {}).content || {}, name = c.title || c.label || c.kicker || id;
     const li = document.createElement('li');
-    if ((C.stops[id] || {}).section) li.className = 'nav__item--section'; // разделы тритмента после истории
+    if (isSection(id)) li.className = 'nav__item--section'; // разделы тритмента после истории
     const b = document.createElement('button');
     b.className = 'nav__dot';
-    b.setAttribute('aria-label', `${pad(i + 1)} — ${name}`);
+    b.setAttribute('aria-label', isSection(id) ? `Решение ${decisions.indexOf(id) + 1} — ${name}` : `${pad(story.indexOf(id) + 1)} — ${name}`);
     b.title = name;
     b.addEventListener('click', () => goTo(id));
     li.append(b);
@@ -66,12 +69,19 @@
     const i = idx(current);
     prev.hidden = i <= 0;
     next.hidden = i >= tour.length - 1;
-    count.textContent = `${pad(i + 1)} / ${pad(tour.length)}`;
+    count.textContent = isSection(current)
+      ? `Решения ${decisions.indexOf(current) + 1}/${decisions.length}`
+      : `${pad(story.indexOf(current) + 1)} / ${pad(story.length)}`;
+    // конец истории (логотип): «Вперёд» с подписью ведёт к разбору, сам кадр остаётся чистым
+    const bridge = !isSection(current) && isSection(tour[i + 1]);
+    next.classList.toggle('nav__next--bridge', bridge);
+    next.setAttribute('aria-label', bridge ? 'Режиссёрские решения' : 'Вперёд');
     dots.querySelectorAll('.nav__dot').forEach((b, j) => b.toggleAttribute('aria-current', j === i));
     document.body.dataset.slide = current;
     const mf = (C.stops[current] || {}).mobileFrame || {}; // кадр целиком на узком экране
     document.body.dataset.fit = mf.fit || '';
     document.body.dataset.frame = mf.frame || '';
+    document.body.dataset.fitAll = ((C.stops[current] || {}).frame || {}).fit || ''; // кадр целиком на любом экране
     document.body.classList.toggle('on-cover', current === COVER);
   }
   prev.addEventListener('click', () => step(-1));
@@ -256,10 +266,16 @@
           const li = el('li', 'timeline__seg'), bar = el('span', 'timeline__bar');
           li.style.setProperty('--t', s.t);
           if (s.poster) bar.style.backgroundImage = `url("${s.poster}")`;
-          li.append(bar, el('span', 'timeline__time', secs(s.t)), el('span', 'timeline__label', s.label));
+          if (s.zoom) bar.style.backgroundSize = `${s.zoom * 100}% auto`;
+          if (s.background) bar.style.backgroundColor = s.background;
+          li.append(bar, el('span', 'timeline__time', secs(s.t)), el('span', 'timeline__label', s.label), el('span', 'timeline__len'));
           ol.append(li);
         });
-        scale.append(el('span', null, '0 с'), el('span', null, secs(total)));
+        for (let t = 0; t <= total + 1e-9; t += 5) { // засечки каждые 5 секунд
+          const tick = el('span', 'timeline__tick', t === 0 || t >= total - 1e-9 ? secs(t) : String(t));
+          tick.style.setProperty('--at', (t / total * 100) + '%');
+          scale.append(tick);
+        }
         wrap.append(ol, scale);
         parts.push(wrap);
         if (c.notes) {

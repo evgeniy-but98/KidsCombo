@@ -150,15 +150,16 @@
         if (cs.frame.background) el.style.backgroundColor = cs.frame.background;
       }
       // Узкий экран: кадр целиком, свободное место — заполнение (CONFIG.stops.<id>.mobileFrame, см. style.css)
-      const mf = (C.stops[id] || {}).mobileFrame;
+      const mf = cs.mobileFrame, narrowFit = mf && mf.fit === 'contain';
+      if (narrowFit) { el.dataset.fit = 'contain'; if (mf.frame) el.dataset.frame = mf.frame; }
+      // заполнение полей: на узком экране (mobileFrame) и/или на любом (frame.fill — кадр пэкшота целиком на 16:10, 21:9)
+      const fill = (narrowFit && (mf.fill || 'ambient')) || (cs.frame && cs.frame.fill);
       let cv = null;
-      if (mf && mf.fit === 'contain') {
-        el.dataset.fit = 'contain';
-        el.dataset.fill = mf.fill || 'ambient';
-        if (mf.frame) el.dataset.frame = mf.frame;
-        const f = div('stop__fill');
-        if (mf.tint) f.style.setProperty('--tint', mf.tint);
-        if (el.dataset.fill === 'ambient') {
+      if (fill) {
+        el.dataset.fill = fill;
+        const f = div('stop__fill'), tint = (mf && mf.tint) || (cs.frame && cs.frame.tint);
+        if (tint) f.style.setProperty('--tint', tint);
+        if (fill === 'ambient') {
           if (s.poster) f.style.backgroundImage = `url("${s.poster}")`;
           cv = document.createElement('canvas');
           cv.width = 64; cv.height = 36;
@@ -184,9 +185,8 @@
   // «Живое размытие» вокруг кадра: раз в 120 мс крошечная копия текущего кадра в canvas, размывает её CSS
   const narrow = matchMedia('(max-width: 700px), (max-height: 500px), (max-aspect-ratio: 4/3)');
   setInterval(() => {
-    if (!narrow.matches) return;
     for (const L of layers.values()) {
-      if (!L.cx || L.el.style.opacity === '0') continue;
+      if (!L.cx || L.el.style.opacity === '0' || !(narrow.matches || L.el.dataset.fitAll)) continue;
       const v = L.videos.find(x => !x.paused) || L.videos[0];
       if (v && v.readyState >= 2) L.cx.drawImage(v, 0, 0, L.cv.width, L.cv.height);
     }
