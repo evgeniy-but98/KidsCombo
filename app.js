@@ -198,21 +198,19 @@
   function more(m, sec) {
     const d = el('details', 'slide__more');
     d.append(el('summary', null, m.title), palette(m.colors, 'palette palette--compact'));
-    d.addEventListener('toggle', () => { if (d.open && sec.classList.contains('is-open')) setOpen(sec, false); });
+    d.addEventListener('toggle', () => fit(sec, true)); // плашка остаётся на месте; что не поместилось — прокручивается
     return d;
   }
-  // Свёрнутая плашка на телефоне: заголовок + «Читать», текст раскрывается по нажатию.
-  // Текст и палитра на телефоне не раскрываются одновременно — иначе вместе закроют лицо.
+  // Текст не поместился целиком: видны заголовок и начало, остальное — по «Читать дальше» (прокрутка внутри плашки)
   function setOpen(sec, on) {
     sec.classList.toggle('is-open', on);
     const b = sec.querySelector('.slide__open');
     b.setAttribute('aria-expanded', on);
-    b.textContent = on ? 'Свернуть' : 'Читать';
-    const d = sec.querySelector('.slide__more');
-    if (on && d && d.open) d.open = false;
+    b.textContent = on ? 'Свернуть' : 'Читать дальше';
+    fit(sec, true);
   }
   function opener(sec) {
-    const b = el('button', 'slide__open', 'Читать');
+    const b = el('button', 'slide__open', 'Читать дальше');
     b.type = 'button';
     b.setAttribute('aria-expanded', 'false');
     b.addEventListener('click', () => setOpen(sec, !sec.classList.contains('is-open')));
@@ -377,22 +375,14 @@
     if (c.size) sec.dataset.size = c.size;
     if (c.scrim === false) sec.dataset.scrim = 'off';
     if (c.wide) sec.dataset.wide = '';
-    if (c.box) { // место в долях видеокадра, см. style.css (#overlay --fw/--fh)
-      sec.dataset.box = c.box.y == null ? 'bottom' : 'top';
-      sec.dataset.mobile = c.mobile || 'top';
-      sec.style.setProperty('--bx', c.box.x);
-      sec.style.setProperty('--bw', c.box.w);
-      if (c.box.max) sec.style.setProperty('--bmax', c.box.max + 'rem');
-      if (c.box.avoid) sec.dataset.avoid = c.box.avoid; // не под кнопки справа вверху
-      if (c.box.y != null) sec.style.setProperty('--by', c.box.y);
-    }
+    sec._c = c;
+    if (c.box) sec.dataset.box = ''; // плашка на кадре: место выбирает fit() — см. ниже
     const texts = () => list(c.text).forEach(t => parts.push(el('p', 'slide__text', t)));
     if (c.kicker) parts.push(el('p', 'slide__kicker', c.kicker));
     if (c.title && c.layout !== 'quote') parts.push(el(c.layout === 'title' ? 'h1' : 'h2', 'slide__title', c.title));
-    if (c.box && (c.text || c.more)) parts.push(opener(sec));
     switch (c.layout) {
       case 'title':
-        if (c.text) parts.push(el('p', 'slide__lead', list(c.text).join(' ')));
+        list(c.text).forEach(t => parts.push(el('p', 'slide__lead', t)));
         break;
       case 'quote':
         if (c.text) parts.push(el('blockquote', 'slide__quote', list(c.text).join(' ')));
@@ -463,11 +453,102 @@
         texts();
     }
     if (c.more) parts.push(more(c.more, sec));
+    if (c.box && c.text) parts.push(opener(sec)); // видна, только если текст не поместился целиком
     parts.forEach((p, i) => { p.style.setProperty('--i', i); block.append(p); });
     sec.append(el('div', 'slide__scrim'), block);
     if (c.layout === 'finale' && c.caption) sec.append(el('p', 'slide__credit', c.caption));
     return sec;
   }
+
+  // ---------- место и объём плашки на кадре (content.box) ----------
+  // Компьютер: из вариантов box берётся первый, где текст целиком помещается и не задевает content.keep
+  // (что на кадре нельзя закрывать), кнопки и навигацию. Кадр 16:9 — по cover, в очень широком окне (от 37:20) — целиком.
+  // Телефон и узкие окна: кадр — карточкой, плашку рядом с ней ставит CSS. Если текст всё же не помещается —
+  // видны заголовок и начало текста (сначала убираются последние абзацы, потом строки), остальное — по «Читать дальше».
+  const cardMode = matchMedia('(max-width: 700px), (max-height: 580px), (max-aspect-ratio: 4/3)');
+  const wideMode = matchMedia('(min-aspect-ratio: 37/20)');
+  const insetProbe = el('div', 'inset-probe'); // отступы от краёв с учётом выреза экрана (--inset-*)
+  document.body.append(insetProbe);
+  function insets() {
+    const s = getComputedStyle(insetProbe);
+    return { t: parseFloat(s.paddingTop), r: parseFloat(s.paddingRight), b: parseFloat(s.paddingBottom), l: parseFloat(s.paddingLeft) };
+  }
+  // кнопки звука и текста справа вверху и навигация внизу — с зазором 8 px
+  function uiRects() {
+    return ['.mute', '.text-toggle', '.nav'].map(s => $(s))
+      .filter(e => e && !e.hidden && e.offsetWidth && getComputedStyle(e).visibility !== 'hidden')
+      .map(e => { const b = e.getBoundingClientRect(); return { l: b.left - 8, t: b.top - 8, r: b.right + 8, b: b.bottom + 8, top: b.top < innerHeight / 2 }; });
+  }
+  function place(sec, c, block, ins, sticky) {
+    const W = overlay.clientWidth, H = overlay.clientHeight, st = C.stops[sec._id] || {}, R = 16 / 9;
+    const contain = (st.frame || {}).fit === 'contain' || ((st.mobileFrame || {}).fit === 'contain' && wideMode.matches);
+    const fw = contain ? Math.min(W, H * R) : Math.max(W, H * R), fh = fw / R, fx = (W - fw) / 2, fy = (H - fh) / 2;
+    const pad = c.layout === 'title' ? 12 : 0; // у вступления мягкая подложка выходит за текст
+    const keep = Object.values(c.keep || {}).map(([x1, y1, x2, y2]) =>
+      ({ l: fx + fw * x1 / 100 - pad, t: fy + fh * y1 / 100 - pad, r: fx + fw * x2 / 100 + pad, b: fy + fh * y2 / 100 + pad }));
+    const ui = uiRects(), rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16, minW = 16 * rem;
+    const cands = list(c.box);
+    const tryBox = i => {
+      const b = cands[i], size = b.size || c.size;
+      if (size) sec.dataset.size = size; else delete sec.dataset.size;
+      const left = Math.max(ins.l, fx + fw * b.x / 100);
+      let right = Math.min(b.r != null ? fx + fw * b.r / 100 : left + fw * b.w / 100, left + (b.max || 40) * rem, W - ins.r);
+      let top = Math.max(ins.t, fy + fh * (b.y || 0) / 100);
+      for (const u of ui) if (u.top && right > u.l && left < u.r && top < u.b) { if (b.avoid === 'left') right = Math.min(right, u.l); else top = u.b; }
+      Object.assign(block.style, { left: left + 'px', top: top + 'px', width: right - left + 'px' });
+      let limit = H - ins.b, blocked = right - left < minW - 1;
+      for (const o of keep.concat(ui)) {
+        if (o.r <= left || o.l >= right || o.b <= top) continue; // не под плашкой
+        if (o.t <= top) { blocked = true; break; }            // уже у верхнего края плашки — вариант не годится
+        limit = Math.min(limit, o.t);
+      }
+      const room = limit - top - 4;
+      return { i, room, spare: room - block.offsetHeight, blocked }; // высота самого текста, без мягкой подложки вступления
+    };
+    const order = sticky && sec._box != null ? [sec._box] : cands.map((_, i) => i);
+    let best = null, last = null;
+    for (const i of order) {
+      const r = last = tryBox(i);
+      if (!r.blocked && r.spare >= 0) { best = r; break; }
+      if (!best || (best.blocked && !r.blocked) || (r.blocked === best.blocked && r.spare > best.spare)) best = r;
+    }
+    if (best !== last) tryBox(best.i);
+    sec._box = best.i;
+    return best.room;
+  }
+  function fit(sec, sticky) {
+    const c = sec._c, block = sec.querySelector('.slide__block');
+    if (!c || !c.box || !sec.isConnected) return;
+    sec.classList.remove('is-clamped');
+    block.querySelectorAll('.is-cut, .is-hidden').forEach(p => { p.classList.remove('is-cut', 'is-hidden'); p.style.removeProperty('-webkit-line-clamp'); });
+    block.style.maxHeight = '';
+    const ins = insets(), H = overlay.clientHeight;
+    let room;
+    if (cardMode.matches) { // рядом с карточкой кадра: место и предельную высоту задаёт CSS
+      block.style.left = block.style.top = block.style.width = '';
+      if (c.size) sec.dataset.size = c.size; else delete sec.dataset.size;
+      room = parseFloat(getComputedStyle(block).maxHeight) || H;
+    } else room = place(sec, c, block, ins, sticky);
+    if (sec.classList.contains('is-open')) { // раскрыто: весь текст, лишнее прокручивается внутри плашки
+      block.style.maxHeight = (cardMode.matches ? room : Math.max(room, H - ins.b - 64 - block.offsetTop)) + 'px';
+      return;
+    }
+    const over = () => (cardMode.matches ? block.scrollHeight : block.offsetHeight) > room + 1; // у карточки высоту ограничивает CSS
+    if (!over()) return;
+    if (block.querySelector('.slide__more[open]')) { block.style.maxHeight = room + 'px'; return; } // раскрытая палитра
+    sec.classList.add('is-clamped');
+    const ps = [...block.querySelectorAll('.slide__text, .slide__lead')];
+    for (let i = ps.length - 1; i >= 0 && over(); i--) {
+      const p = ps[i], lh = parseFloat(getComputedStyle(p).lineHeight) || 24;
+      let n = Math.max(1, Math.round(p.offsetHeight / lh));
+      p.classList.add('is-cut');
+      p.style.webkitLineClamp = n;
+      while (n > 1 && over()) p.style.webkitLineClamp = --n;
+      if (over()) p.classList.add('is-hidden');
+    }
+  }
+  let fitRaf = 0;
+  addEventListener('resize', () => { cancelAnimationFrame(fitRaf); fitRaf = requestAnimationFrame(() => { if (shown) fit(shown); }); });
   // Текст показывается один раз на приход к остановке (повтор цикла видео его не трогает);
   // зритель может скрыть его кнопкой или клавишей T — тогда он не появляется и на следующих остановках.
   let textOn = true, textTimer = 0;
@@ -475,7 +556,9 @@
     const c = (C.stops[id] || {}).content;
     if (!textOn || shown || !c || !c.layout || c.layout === 'none') return;
     const s = shown = render(c);
+    s._id = id;
     overlay.append(s);
+    fit(s); // место на кадре и объём текста — до проявления, без скачков
     void s.offsetWidth; // стартовые стили применены — дальше идут transition
     s.classList.add('is-in');
   }

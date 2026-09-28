@@ -152,6 +152,7 @@
       // Узкий экран: кадр целиком, свободное место — заполнение (CONFIG.stops.<id>.mobileFrame, см. style.css)
       const mf = cs.mobileFrame, narrowFit = mf && mf.fit === 'contain';
       if (narrowFit) { el.dataset.fit = 'contain'; if (mf.frame) el.dataset.frame = mf.frame; }
+      if (cs.content && cs.content.box) el.dataset.text = ''; // на телефоне карточка сверху (слева), текст — рядом с ней
       // заполнение полей: на узком экране (mobileFrame) и/или на любом (frame.fill — кадр пэкшота целиком на 16:10, 21:9)
       const fill = (narrowFit && (mf.fill || 'ambient')) || (cs.frame && cs.frame.fill);
       let cv = null;
@@ -183,7 +184,7 @@
   }
   const stopLayer = id => layer('stop:' + id);
   // «Живое размытие» вокруг кадра: раз в 120 мс крошечная копия текущего кадра в canvas, размывает её CSS
-  const narrow = matchMedia('(max-width: 700px), (max-height: 500px), (max-aspect-ratio: 4/3)');
+  const narrow = matchMedia('(max-width: 700px), (max-height: 580px), (max-aspect-ratio: 4/3), (min-aspect-ratio: 37/20)');
   setInterval(() => {
     for (const L of layers.values()) {
       if (!L.cx || L.el.style.opacity === '0' || !(narrow.matches || L.el.dataset.fitAll)) continue;
